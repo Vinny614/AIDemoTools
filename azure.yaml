@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: multimodal-llm-ai-processing-accelerator
+metadata:
+  template: multimodal-llm-ai-processing-accelerator@0.0.1
+hooks:
+  postprovision: 
+    # Create all content understanding analyzers defined in the content_understanding_schemas.json file
+    # This hook will only run if the Content Understanding resource is deployed and the endpoint URL is 
+    # available in the "CONTENT_UNDERSTANDING_ENDPOINT" Bicep output (which is automatically set as
+    # an env var when running this hook).
+    posix:
+      shell: sh
+      run: |
+        if [ -n "$CONTENT_UNDERSTANDING_ENDPOINT" ] && [ "$CONTENT_UNDERSTANDING_ENDPOINT" != "null" ]; then
+          python ./function_app/create_content_understanding_analyzers.py
+        else
+          echo "Skipping Content Understanding analyzer creation - the resource has not been deployed and/or no endpoint URL is available in the Bicep outputs"
+        fi
+      interactive: true
+      continueOnError: false
+      
+    windows:
+      shell: pwsh
+      run: |
+        if ($env:CONTENT_UNDERSTANDING_ENDPOINT) {
+          python ./function_app/create_content_understanding_analyzers.py
+        } else {
+          Write-Host "Skipping Content Understanding analyzer creation - the resource has not been deployed and/or no endpoint URL is available in the Bicep outputs"
+        }
+      interactive: true
+      continueOnError: false
+services:
+  api:
+    project: ./function_app/
+    language: python
+    host: function
+    hooks:
+      prepackage: 
+        # Temporarily copy the requirements.txt to the function app directory so that it is packaged with the function app
+        posix:
+          shell: sh
+          run: cp ../requirements.txt requirements.txt
+          interactive: false
+          continueOnError: false
+        windows:
+          shell: pwsh
+          run: copy ../requirements.txt requirements.txt
+          interactive: false
+          continueOnError: false
+      postpackage: 
+        # Remove the requirements.txt file from the function app directory
+        posix:
+          shell: sh
+          run: rm ./requirements.txt
+          interactive: false
+          continueOnError: false
+        windows:
+          shell: pwsh
+          run: del ./requirements.txt
+          interactive: false
+          continueOnError: false
+  webapp:
+    project: ./demo_app/
+    language: py
+    host: appservice
+    hooks:
+      prepackage: 
+        # Copy the requirements.txt and content_understanding_schemas.json files to the demo_app directory to give it knowledge of the deployed content understanding schemas,
+        # and temporarily move the .env file since .webappignore (https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/service-packaging-ignore-files) does not seem to work.
+        posix:
+          shell: sh
+          run: cp ../requirements.txt requirements.txt && cp ../function_app/config/content_understanding_schemas.json ./ && if [ -f "./.env" ]; then mv ./.env ../.demo_app.env.bak; fi
+          interactive: false
+          continueOnError: false
+        windows:
+          shell: pwsh
+          run: copy ../requirements.txt requirements.txt; copy ../function_app/config/content_understanding_schemas.json ./; if (Test-Path -Path "./.env") { Move-Item -Path "./.env" -Destination "../.demo_app.env.bak" }
+          interactive: false
+          continueOnError: false
+      postpackage: 
+        # Remove the requirements.txt and content_understanding_schemas.json files from the demo_app directory and restore the .env file
+        posix:
+          shell: sh
+          run: rm ./requirements.txt && rm ./content_understanding_schemas.json && if [ -f "../.demo_app.env.bak" ]; then mv ../.demo_app.env.bak ./.env; fi
+          interactive: false
+          continueOnError: false
+        windows:
+          shell: pwsh
+          run: del ./requirements.txt; del ./content_understanding_schemas.json; if (Test-Path -Path "../.demo_app.env.bak") { Move-Item -Path "../.demo_app.env.bak" -Destination "./.env" }
+          interactive: false
+          continueOnError: false

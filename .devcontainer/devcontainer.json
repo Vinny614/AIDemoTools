@@ -1,0 +1,9 @@
+{
+  "name": "Korin Dev Env",
+  "image": "korin/dev-env:dev",
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+  ]
+}
