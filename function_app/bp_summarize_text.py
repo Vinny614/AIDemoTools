@@ -45,9 +45,12 @@ class FunctionRequestModel(BaseModel):
 
 
 LLM_SYSTEM_PROMPT = (
-    "You are an expert in summarizing and adapting information. "
-    "Your task is to take the following text and summarize it into "
-    "exactly {} sentences, and with the result written in the style of '{}'."
+    "You are an expert in summarising and adapting information. "
+    "Your task is to:\n"
+    "1. Summarise the following text into exactly {} sentences, "
+    "written in the style of '{}'.\n"
+    "2. Then, list the key factual points as bullet points in plain English.\n\n"
+    "Return the summary first, followed by the bullet points."
 )
 
 
