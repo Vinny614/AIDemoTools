@@ -45,13 +45,13 @@ DOC_INTEL_MODEL_ID = "prebuilt-read"  # Set Document Intelligence model ID
 di_client = DocumentIntelligenceClient(
     endpoint=DOC_INTEL_ENDPOINT,
     credential=DefaultAzureCredential(),
-    api_version="",
+    api_version="2024-11-30",
 )
 aoai_client = AzureOpenAI(
     azure_endpoint=AOAI_ENDPOINT,
     azure_deployment=AOAI_LLM_DEPLOYMENT,
     azure_ad_token_provider=aoai_token_provider,
-    api_version="",
+    api_version="2024-06-01",
     timeout=30,
     max_retries=0,
 )
