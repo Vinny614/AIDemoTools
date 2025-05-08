@@ -1458,7 +1458,7 @@ with gr.Blocks(analytics_enabled=False) as sum_text_block:
     # Input components
     sum_text_instructions = gr.Markdown(
         (
-            "This simple demo uses a single LLM request to summarize a body of text "
+            "This simple demo uses a single LLM request to summarise a body of text "
             "into a desired style and number of sentences "
             "([Code Link](https://github.com/Azure/multimodal-ai-llm-processing-accelerator/blob/main/function_app/bp_summarize_text.py))."
         ),
@@ -1467,8 +1467,8 @@ with gr.Blocks(analytics_enabled=False) as sum_text_block:
     with gr.Row():
         sum_text_style_dropdown = gr.Dropdown(
             label="Select or enter the style of the generated summary",
-            value="Australian Slang",
-            choices=["Academic Writing", "Australian Slang", "Pirate", "Poetry"],
+            value="Police Report",
+            choices=["Police Report", "Incident Log", "Breifing Note", "Plain English"],
             allow_custom_value=True,
         )
         sum_text_num_sentences = gr.Number(
@@ -1477,7 +1477,7 @@ with gr.Blocks(analytics_enabled=False) as sum_text_block:
         )
     # Examples
     sum_text_input_text = gr.Textbox(
-        value="", lines=3, label="Enter the text to be summarized"
+        value="", lines=3, label="Enter the text to be summarised"
     )
     sum_text_example_dropdown_options = [
         (
@@ -2066,7 +2066,7 @@ with gr.Blocks(
         # Only render the CosmosDB tab if CosmosDB database info is available
         with gr.Tab("Form Extraction (Blob -> CosmosDB)"):
             blob_form_extraction_to_cosmosdb_block.render()
-    with gr.Tab("Summarize Text (HTTP)"):
+    with gr.Tab("Summarise Text (HTTP)"):
         sum_text_block.render()
     with gr.Tab("PII Redaction (HTTP)"):
         pii_redaction_block.render()
