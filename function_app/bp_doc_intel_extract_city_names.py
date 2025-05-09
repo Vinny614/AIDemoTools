@@ -88,6 +88,39 @@ class LLMCityNamesModel(LLMResponseBaseModel):
         examples=[["London", "Paris", "New York"]],
     )
 
+class LLMInvestigationExtractionModel(LLMResponseBaseModel):
+    people: list[str] = Field(
+        description="Names of people mentioned in the text.",
+        examples=[["Daniel Smith", "PC Rachel Jones"]]
+    )
+    locations: list[str] = Field(
+        description="Addresses or places described.",
+        examples=[["221B Baker Street, London", "Piccadilly Circus"]]
+    )
+    times: list[str] = Field(
+        description="Dates and times of events.",
+        examples=[["3 April 2023, 22:15", "half past nine in the evening"]]
+    )
+    events: list[str] = Field(
+        description="Crimes or key incidents described.",
+        examples=[["burglary", "knife assault", "antisocial behaviour"]]
+    )
+    vehicles: list[str] = Field(
+        description="Descriptions or identifiers of vehicles.",
+        examples=[["Silver Vauxhall Astra, reg. AB12 CDE"]]
+    )
+    weapons: list[str] = Field(
+        description="Descriptions of weapons or tools.",
+        examples=[["kitchen knife", "metal crowbar"]]
+    )
+    descriptions: list[str] = Field(
+        description="Suspect or witness physical descriptions.",
+        examples=[["White male, mid-30s, wearing a black tracksuit"]]
+    )
+    contact_info: list[str] = Field(
+        description="Any phone numbers, emails, or contact details.",
+        examples=[["+44 7911 123456", "witness@mail.co.uk"]]
+    )
 
 class FunctionReponseModel(BaseModel):
     """
@@ -99,7 +132,7 @@ class FunctionReponseModel(BaseModel):
     success: bool = Field(
         False, description="Indicates whether the pipeline was successful."
     )
-    result: Optional[LLMCityNamesModel] = Field(
+    result: Optional[LLMInvestigationExtractionModel] = Field(
         None, description="The final result of the pipeline."
     )
     func_time_taken_secs: Optional[float] = Field(
@@ -138,6 +171,11 @@ LLM_SYSTEM_PROMPT = (
     f"{LLMCityNamesModel.get_prompt_json_example(include_preceding_json_instructions=True)}"
 )
 
+LLM_INVESTIGATION_PROMPT = (
+    "You are a digital investigator helping police review text for leads. "
+    "Extract the following information and return it as a structured JSON object:\n"
+    f"{LLMInvestigationExtractionModel.get_prompt_json_example(include_preceding_json_instructions=True)}"
+)
 
 @bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
 def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
@@ -213,7 +251,7 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
         input_messages = [
             {
                 "role": "system",
-                "content": LLM_SYSTEM_PROMPT,
+                "content": LLM_INVESTIGATION_PROMPT,
             },
             content_openai_message,
         ]
@@ -232,7 +270,7 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
         error_text = "An error occurred when validating the LLM's returned response into the expected schema."
         output_model.llm_reply_message = llm_result.choices[0].to_dict()
         output_model.llm_raw_response = llm_result.choices[0].message.content
-        llm_structured_response = LLMCityNamesModel(
+        llm_structured_response = LLMInvestigationExtractionModel(
             **json.loads(llm_result.choices[0].message.content)
         )
         output_model.result = llm_structured_response
