@@ -327,7 +327,7 @@ When using private endpoints:
   - To do this, open a terminal window and navigate to the root directory of the repository. You can then use a package manager like `conda`, `venv` or `virtualenv` to create the environment - below are some example commands (you should read the documentation for these libraries if they are not already installed on your system):
     - Anaconda: `conda create -n mm_ai_llm_processing_accelerator python=3.11 --no-default-packages` to create the environment, then activate the environment with `conda activate mm_ai_llm_processing_accelerator` each time you want run or deploy the solution.
     - venv: `python -m venv .venv` to create the environment, then activate the environment with `source .venv/bin/activate` (linux/MacOS) or `.venv\Scripts\Activate.ps1` (Windows Powershell) each time you want run or deploy the solution. More info [here](https://python.land/virtual-environments/virtualenv#Python_venv_activation).
-  - Once the new environment is created and activated, install the python requirements file: `pip install -r requirements.txt`. This contains the dependencies for both the function and web apps.
+  - Once the new environment is created and activated, install the python requirements file: ` install -r requirements.txt`. This contains the dependencies for both the function and web apps.
   - Make sure you have activated the environment each time you need to deploy the solution or run it locally.
 - Install the [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) and login using `az login`.
 - Install the [Azure Developer CLI](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd) (`azd`) and login using `azd auth login`.
@@ -344,7 +344,7 @@ Execute the following command, if you don't have any pre-existing Azure services
 1. Review the default parameters in `infra/main.bicepparam` and update as required. At a minimum, make sure to update the `additionalRoleAssignmentIdentityIds` parameter with your identity ID, review the AI resource deployment locations, and review the networking configuration (see the file for instructions).
     - Note that most resources are deployed to the region that the resource group is created in, but certain AI service resources can be deployed to a different independent location. This enables you to deploy those resources in a different region to the app & databases (so that you have access to a different set of features or models).
 1. Run `azd up` to start the deployment. Follow the prompts to create or select the resource group, base location and other parameters. This will then provision the Azure resources and deploy the services.
-
+pip
 > [!WARNING]
 > When deploying for the first time, you may receive a `ServiceUnavailable` error when attempting to deploy the apps after provisioning. This is due to a known bug when retrieving the function key for a newly deployed Azure Function. If this error occurs, simply wait 1-2 minutes and then rerun `azd deploy`. The deployment should then complete successfully.
 

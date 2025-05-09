@@ -1759,38 +1759,56 @@ with gr.Blocks(analytics_enabled=False) as pii_redaction_block:
             pii_redaction_output_pdf_pages,
         ],
     )
-
 ### Doc Intelligence Extraction + LLM Name Extraction Example ###
 with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
-    # Define requesting function, which reshapes the input into the correct schema
+    # Format API response into markdown
+    def format_investigation_fields(response_json: dict) -> str:
+        if not isinstance(response_json, dict):
+            return "Invalid response format."
+ 
+        fields = response_json.get("result", {})
+        if not fields:
+            return "No result found in response."
+ 
+        md_lines = []
+        for key, value in fields.items():
+            if isinstance(value, list) and value:
+                md_lines.append(f"### {key.replace('_', ' ').title()}")
+                for item in value:
+                    md_lines.append(f"- {item}")
+                md_lines.append("")
+ 
+        return "\n".join(md_lines) if md_lines else "No fields extracted."
+ 
+    # Upload + API call handler
     def di_llm_ext_names_upload(file: str):
-        # Get response from the API
         mime_type = mimetypes.guess_type(file)[0]
         with open(file, "rb") as f:
             data = f.read()
             headers = {"Content-Type": mime_type}
-            return send_request(
+            status_code, time_taken, response = send_request(
                 route="doc_intel_extract_city_names",
                 data=data,
                 headers=headers,
-                force_json_content_type=True,  # JSON gradio block requires this
+                force_json_content_type=True,
             )
-
-    # Input components
+        formatted_md = format_investigation_fields(response)
+        return status_code, time_taken, formatted_md, response
+ 
+    # UI components
     di_llm_ext_names_instructions = gr.Markdown(
         (
             "This example uses Azure Document Intelligence to extract the raw text from a PDF or image file, then "
-            "sends a the instructions and extracted text to GPT-4o "
+            "sends the instructions and extracted text to GPT-4o "
             "([Code Link](https://github.com/Azure/multimodal-ai-llm-processing-accelerator/blob/main/function_app/bp_doc_intel_extract_city_names.py))."
             "\n\nThe pipeline is as follows:\n"
-            "1. Azure Document Intelligence extracts the raw text from the PDF along with confidence scores for each "
-            "word/line.\n"
-            "2. The raw extracted text is sent to GPT-4o and it is instructed to extract a list of city names that "
-            "appear in the file.\n\n"
-            "The response includes the final result, as well as many of the intermediate outputs from the processing pipeline."
+            "1. Azure Document Intelligence extracts the raw text from the PDF along with confidence scores.\n"
+            "2. GPT-4o is instructed to extract a list of city names.\n\n"
+            "The response includes the final result, as well as intermediate outputs from the processing pipeline."
         ),
         show_label=False,
     )
+ 
     with gr.Row():
         di_llm_ext_names_file_upload = gr.File(
             label="Upload File. To upload a different file, Hit the 'X' button to the top right of this element ->",
@@ -1800,36 +1818,33 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
         di_llm_ext_names_input_thumbs = gr.Gallery(
             label="File Preview", object_fit="contain", visible=True
         )
-    # Examples
+ 
     di_llm_ext_names_examples = gr.Examples(
         examples=DEMO_VISION_FILES,
         inputs=[di_llm_ext_names_file_upload],
         label=FILE_EXAMPLES_LABEL,
-        outputs=[
-            di_llm_ext_names_input_thumbs,
-        ],
+        outputs=[di_llm_ext_names_input_thumbs],
         fn=render_visual_media_input,
         run_on_click=True,
     )
+ 
     form_ext_w_conf_process_btn = gr.Button("Process File", variant="primary")
-    # Output components
+ 
     with gr.Column() as di_llm_ext_names_output_row:
         di_llm_ext_names_output_label = gr.Label(value="API Response", show_label=False)
         with gr.Row():
-            di_llm_ext_names_status_code = gr.Textbox(
-                label="Response Status Code", interactive=False
-            )
-            di_llm_ext_names_time_taken = gr.Textbox(
-                label="Time Taken", interactive=False
-            )
+            di_llm_ext_names_status_code = gr.Textbox(label="Response Status Code", interactive=False)
+            di_llm_ext_names_time_taken = gr.Textbox(label="Time Taken", interactive=False)
+        di_llm_ext_names_output_md = gr.Markdown(label="Formatted Response")
         di_llm_ext_names_output_json = gr.JSON(label="API Response")
-    # Actions
+ 
     form_ext_w_conf_process_btn.click(
         fn=di_llm_ext_names_upload,
         inputs=[di_llm_ext_names_file_upload],
         outputs=[
             di_llm_ext_names_status_code,
             di_llm_ext_names_time_taken,
+            di_llm_ext_names_output_md,
             di_llm_ext_names_output_json,
         ],
     )
