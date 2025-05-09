@@ -2085,7 +2085,7 @@ with gr.Blocks(
         sum_text_block.render()
     with gr.Tab("PII Redaction (HTTP)"):
         pii_redaction_block.render()
-    with gr.Tab("City Names Extraction, Doc Intelligence (HTTP)"):
+    with gr.Tab("Key Information Extraction, Doc Intelligence (HTTP)"):
         di_llm_ext_names_block.render()
 
 if __name__ == "__main__":
