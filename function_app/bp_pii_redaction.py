@@ -7,8 +7,10 @@ from typing import Optional
 
 import azure.functions as func
 import fitz
-from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+# from azure.ai.documentintelligence import DocumentIntelligenceClient
+# from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+from azure.ai.formrecognizer import DocumentAnalysisClient # added for UK South
+
 from azure.ai.textanalytics import TextAnalyticsClient
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from dotenv import load_dotenv
@@ -60,11 +62,18 @@ text_analytics_client = TextAnalyticsClient(
 # Document Intelligence Processor Walkthrough Notebook for more information
 # (within the `notebooks` folder).
 DOC_INTEL_MODEL_ID = "prebuilt-read"  # Set Document Intelligence model ID
-di_client = DocumentIntelligenceClient(
+# di_client = DocumentIntelligenceClient(
+#    endpoint=DOC_INTEL_ENDPOINT,
+#    credential=credential,
+#    api_version="2024-07-31-preview",
+#)
+# New UK South GA
+di_client = DocumentAnalysisClient(
     endpoint=DOC_INTEL_ENDPOINT,
     credential=credential,
-    api_version="2024-07-31-preview",
+    api_version="2023-07-31",
 )
+
 
 
 # Setup Pydantic models for validation of the request and response
@@ -375,12 +384,20 @@ def redact_pii_pdf(req: func.HttpRequest) -> func.HttpResponse:
                 [page.get_text(page_num) for page_num, page in enumerate(pdf, start=1)]
             )
         elif TEXT_EXTRACTION_METHOD is PDFTextExtractionMethod.DOCUMENT_INTELLIGENCE:
-            poller = di_client.begin_analyze_document(
-                model_id=DOC_INTEL_MODEL_ID,
-                analyze_request=AnalyzeDocumentRequest(bytes_source=req_body),
+#            poller = di_client.begin_analyze_document(
+#                model_id=DOC_INTEL_MODEL_ID,
+#                analyze_request=AnalyzeDocumentRequest(bytes_source=req_body),
+#            )
+            from io import BytesIO
+            poller = di_client.begin_analyze_document(      
+                DOC_INTEL_MODEL_ID,
+                BytesIO(req_body),
+               # content_type="application/pdf"
             )
+
+
             di_result = poller.result()
-            output_model.di_raw_response = di_result.as_dict()
+            output_model.di_raw_response = di_result.to_dict()
             raw_text = di_result.content
         else:
             raise ValueError(
