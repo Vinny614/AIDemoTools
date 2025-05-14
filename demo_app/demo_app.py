@@ -1381,13 +1381,12 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
     # Input components
     cc_audio_proc_instructions = gr.Markdown(
         (
-            "This example transcribes call center audio records and extract key information "
+            "This example transcribes audio records and extract key information "
             "([Code Link](https://github.com/azure/multimodal-ai-llm-processing-accelerator/blob/main/function_app/bp_call_center_audio_analysis.py))."
             "\n\nThe pipeline is as follows:\n"
-            "1. Azure AI Speech or Azure OpenAI Whisper is used to transcribe a call center recording.\n"
+            "1. Azure AI Speech or Azure OpenAI Whisper is used to transcribe a recording.\n"
             "2. The result is formatted into a more readable format (with timestamps, speaker IDs and the text).\n"
             "3. GPT-4o is instructed to:\n* Classify the customer's sentiment & satisfaction\n"
-            "* Summarize the call into 20 words or less.\n"
             "* Determine the next action that needs to be completed and the timestamp that the action was mentioned.\n"
             "* Extract a list of keywords from the conversation. Each of these keywords is cross-referenced with the "
             "raw transcription to retrieve the entire sentence that contains the keyword.\n"
@@ -2073,7 +2072,7 @@ with gr.Blocks(
         simple_cu_examples_block.render()
     with gr.Tab("Form Extraction with Confidence Scores (HTTP)"):
         form_extraction_with_confidence_block.render()
-    with gr.Tab("Call Center Audio Processing (HTTP)"):
+    with gr.Tab("Audio Processing (HTTP)"):
         call_center_audio_processing_block.render()
     with gr.Tab("Multimodal Document Intelligence Processing (HTTP)"):
         di_proc_block.render()
