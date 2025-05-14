@@ -108,7 +108,9 @@ class TextFunctionReponseModel(BaseModel):
     pii_raw_response: Optional[dict] = Field(
         None, description="The raw API response from PII recognition."
     )
-
+    redacted_items: Optional[list[dict]] = Field(  
+        None, description="The list of redacted items."
+    )
 
 def replace_text(text: str, replacements: dict) -> str:
     """
@@ -124,7 +126,14 @@ def replace_text(text: str, replacements: dict) -> str:
     for find_text, replace_text in replacements.items():
         text = text.replace(find_text, replace_text)
     return text
-
+    output_model = [
+        {
+           "text": entity.text,
+          "category": entity.category,
+          "sub_category": getattr(entity, "sub_category", None),
+         "confidence_score": round(entity.confidence_score, 2)
+        } for entity in pii_result_doc.entities
+    ]
 
 @bp_pii_redaction.route(route=TEXT_FUNCTION_ROUTE)
 def redact_pii_text(req: func.HttpRequest) -> func.HttpResponse:
@@ -180,13 +189,22 @@ def redact_pii_text(req: func.HttpRequest) -> func.HttpResponse:
             entity.text: f"<<{entity.category}>>" for entity in pii_result_doc.entities
         }
         output_model.redacted_text = replace_text(request_obj.text, replacements)
-
+        logging.info(f" Enities found: {len(pii_result_doc.entities)}")
+        output_model.redacted_items = [
+            {
+                "text": entity.text,
+                "category": entity.category,
+                "sub_category": getattr(entity, "sub_category", None),
+                "confidence_score": round(entity.confidence_score, 2),
+            }
+            for entity in pii_result_doc.entities
+        ]
         ### 5. All steps completed successfully, set success=True and return the final result
         output_model.success = True
         output_model.func_time_taken_secs = func_timer.stop()
 
         return func.HttpResponse(
-            body=output_model.model_dump_json(),
+            body=output_model.model_dump_json(exclude_unset=False),
             mimetype="application/json",
             status_code=200,
         )
@@ -198,7 +216,7 @@ def redact_pii_text(req: func.HttpRequest) -> func.HttpResponse:
         output_model.func_time_taken_secs = func_timer.stop()
         logging.exception(output_model.error_text)
         return func.HttpResponse(
-            body=output_model.model_dump_json(),
+            body=output_model.model_dump_json(exclude_unset=False),
             mimetype="application/json",
             status_code=error_code,
         )
@@ -240,7 +258,9 @@ class PDFFunctionReponseModel(BaseModel):
     pii_raw_response: Optional[dict] = Field(
         None, description="The raw API response from PII recognition."
     )
-
+    redacted_items: Optional[list[dict]] = Field(
+        None, description="The list of redacted items."
+    )
 
 def replace_text_in_pdf(
     doc: Document, replacements: dict, inplace: bool = True
@@ -428,12 +448,19 @@ def redact_pii_pdf(req: func.HttpRequest) -> func.HttpResponse:
             for page in redacted_pdf
         ]
         output_model.redacted_pdf_page_imgs = redacted_pdf_page_imgs
-
+        output_model.redacted_items = [
+            {
+                "text": entity.text,
+                "category": entity.category,
+                "sub_category": getattr(entity, "sub_category", None),
+                "confidence_score": round(entity.confidence_score, 2),
+            } for entity in pii_result_doc.entities
+        ]
         ### 5. All steps completed successfully, set success=True and return the final result
         output_model.success = True
         output_model.func_time_taken_secs = func_timer.stop()
         return func.HttpResponse(
-            body=output_model.model_dump_json(),
+            body=output_model.model_dump_json(exclude_unset=False),
             mimetype="application/json",
             status_code=200,
         )
@@ -445,7 +472,7 @@ def redact_pii_pdf(req: func.HttpRequest) -> func.HttpResponse:
         output_model.func_time_taken_secs = func_timer.stop()
         logging.exception(output_model.error_text)
         return func.HttpResponse(
-            body=output_model.model_dump_json(),
+            body=output_model.model_dump_json(exclude_unset=False),
             mimetype="application/json",
             status_code=error_code,
         )
