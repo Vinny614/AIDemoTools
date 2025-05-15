@@ -1357,7 +1357,8 @@ if IS_COSMOSDB_AVAILABLE:
 ### Call Center Audio Processing Example ###
 with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
     # Define requesting function, which reshapes the input into the correct schema
-    def cc_audio_upload(file: str, transcription_method: str):
+    def cc_audio_upload(file_upload, file_record, transcription_method):
+        file = file_upload or file_record
         if file is None:
             gr.Warning(
                 "Please select or upload an audio file, then click 'Process File'."
@@ -1365,9 +1366,12 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
             return ("", "", {})
         # Get response from the API
         with open(file, "rb") as f:
+            mime_type, _= mimetypes.guess_type(file)
+            mime_type = mime_type or "application/octet-stream"
+
             payload = {"method": transcription_method}
             files = {
-                "audio": (file, f, "audio/wav"),
+                "audio": (os.path.basename(file), f, mime_type),
                 "json": ("payload.json", json.dumps(payload), "application/json"),
             }
 
@@ -1395,21 +1399,31 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
         ),
         show_label=False,
     )
-    with gr.Column():
-        cc_audio_proc_audio_input = gr.Audio(
-            label="Upload File. To upload a different file, Hit the 'X' button to the top right of this element ->",
-            sources=["upload", "microphone"],
-            type="filepath",
-        )
+    with gr.Row():
+            audio_upload = gr.File(
+                label="Upload Audio/Video File",
+                file_types=["audio/*", "video/*"]
+             )
+            audio_record = gr.Audio(
+                label="Record Audio",
+                sources=["microphone"],
+                type="filepath"
+            )
+
+
         # Examples
-        cc_audio_proc_examples = gr.Examples(
-            label=AUDIO_EXAMPLES_LABEL,
-            examples=DEMO_CALL_CENTER_AUDIO_FILES,
-            inputs=[
-                cc_audio_proc_audio_input,
-            ],
-        )
-        cc_audio_proc_transcription_method = gr.Dropdown(
+   # cc_audio_proc_examples = gr.Examples(
+   #     label="Audio Upload Examples",
+    #     examples=[
+    #        ["sample1.wav", None],
+    #        [None, "sample2.wav"]
+    #    ],
+    #    inputs=[
+    #        audio_upload,
+    #        audio_record,
+    #    ],
+    #    )
+    cc_audio_proc_transcription_method = gr.Dropdown(
             label="Select Transcription Method",
             value="fast",
             choices={
@@ -1417,7 +1431,7 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                 ("Azure OpenAI Whisper", "aoai_whisper"),
             },
         )
-        cc_audio_proc_start_btn = gr.Button("Process File", variant="primary")
+    cc_audio_proc_start_btn = gr.Button("Process File", variant="primary")
     # Output components
     with gr.Column() as cc_audio_proc_output_row:
         cc_audio_proc_output_label = gr.Label(value="API Response", show_label=False)
@@ -1430,7 +1444,7 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
     # Actions
     cc_audio_proc_start_btn.click(
         fn=cc_audio_upload,
-        inputs=[cc_audio_proc_audio_input, cc_audio_proc_transcription_method],
+        inputs=[audio_upload, audio_record, cc_audio_proc_transcription_method],
         outputs=[
             cc_audio_proc_status_code,
             cc_audio_proc_time_taken,

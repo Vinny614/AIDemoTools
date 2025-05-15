@@ -47,6 +47,8 @@ BATCH_TRANSCRIPTION_MIME_TYPE_MAPPER = {
     "audio/m4a": "m4a",
     "audio/speex": "ogg",
     "audio/x-speex": "ogg",
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
 }
 
 
