@@ -30,18 +30,12 @@ aoai_token_provider = get_bearer_token_provider(
     DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
 )
 
-# Load environment variables
 DOC_INTEL_ENDPOINT = os.getenv("DOC_INTEL_ENDPOINT")
 AOAI_ENDPOINT = os.getenv("AOAI_ENDPOINT")
 AOAI_LLM_DEPLOYMENT = os.getenv("AOAI_LLM_DEPLOYMENT")
 
-# Create the clients for Document Intelligence and Azure OpenAI
-DOC_INTEL_MODEL_ID = "prebuilt-read"  # Set Document Intelligence model ID
+DOC_INTEL_MODEL_ID = "prebuilt-read"
 
-# Set up the Document Intelligence v4.0 preview client. This will allow us to
-# use the latest features of the Document Intelligence service. Check out the
-# Document Intelligence Processor Walkthrough Notebook for more information
-# (within the `notebooks` folder).
 di_client = DocumentIntelligenceClient(
     endpoint=DOC_INTEL_ENDPOINT,
     credential=DefaultAzureCredential(),
@@ -52,199 +46,123 @@ aoai_client = AzureOpenAI(
     azure_deployment=AOAI_LLM_DEPLOYMENT,
     azure_ad_token_provider=aoai_token_provider,
     api_version="2024-06-01",
-    timeout=30,
-    max_retries=0,
+    timeout=60,
+    max_retries=2,
 )
 
-# Create the Doc Intelligence result processor. This can be configured to
-# process the raw Doc Intelligence result into a format that is easier
-# to work with downstream.
 doc_intel_result_processor = DocumentIntelligenceProcessor(
     page_processor=DefaultDocumentPageProcessor(
-        page_img_order="after",  # Include each page image after the page's text content"
+        page_img_order="after",
     ),
     figure_processor=DefaultDocumentFigureProcessor(
-        output_figure_img=False,  # Exclude cropped figure images from the output
+        output_figure_img=False,
     ),
 )
 
+class StructuredPerson(BaseModel):
+    name: str
+    role: Optional[str] = None
+    affiliations: Optional[list[str]] = None
+    vehicles: Optional[list[dict]] = None
+    locations: Optional[list[str]] = None
+    contact_info: Optional[list[str]] = None
 
-# Setup Pydantic models for validation of LLM calls, and the Function response itself
-class LLMCityNamesModel(LLMResponseBaseModel):
-    """
-    Defines the required JSON schema for the LLM to adhere to. This can be used
-    to validate that the LLM's raw text response can be parsed into the format
-    that is expected by downstream processes (e.g. when we need to save the data
-    into a database).
-
-    This class inherits from LLMResponseBaseModel and sets a description and
-    example for each field, allowing us to run `model.get_prompt_json_example()`
-    to generate a prompt-friendly string representation of the expected JSON
-    that we can provide to the LLM.
-    """
-
-    city_names: list[str] = Field(
-        description="A list of city names, that were extracted from the text.",
-        examples=[["London", "Paris", "New York"]],
-    )
+class StructuredEvent(BaseModel):
+    type: str
+    datetime: str
+    location: Optional[str] = None
+    suspects: Optional[list[str]] = None
+    officers: Optional[list[str]] = None
+    vehicles: Optional[list[dict]] = None
+    witness_description: Optional[str] = None
 
 class LLMInvestigationExtractionModel(LLMResponseBaseModel):
-    people: list[str] = Field(
-        description="Names of people mentioned in the text.",
-        examples=[["Daniel Smith", "PC Rachel Jones"]]
-    )
-    relationships: list[str] = Field(
-        description="Descriptions of relationships between people (e.g., suspect-victim, officer-witness).",
-        examples=[["Daniel Smith is the victim", "PC Rachel Jones is the investigating officer"]]
-    )
-    roles: dict[str, str] = Field(
-        description="Map of person names to their roles (e.g. 'Daniel Smith': 'victim').",
-        examples=[{"Daniel Smith": "victim", "Rachel Jones": "officer"}]
-    )
-    times: list[str] = Field(
-        description="Dates and times of events.",
-        examples=[["3 April 2023, 22:15", "half past nine in the evening"]]
-    )
-    time_event_map: dict[str, str] = Field(
-        description="Map of times to what happened at that time.",
-        examples=[{"3 April 2023, 22:15": "Burglary occurred at 221B Baker Street"}]
-    )
-    locations: list[str] = Field(
-        description="Addresses or places described.",
-        examples=[["221B Baker Street, London", "Piccadilly Circus"]]
-    )
-    events: list[str] = Field(
-        description="Crimes or key incidents described.",
-        examples=[["burglary", "knife assault", "antisocial behaviour"]]
-    )
-    vehicles: list[str] = Field(
-        description="Descriptions or identifiers of vehicles.",
-        examples=[["Silver Vauxhall Astra, reg. AB12 CDE"]]
-    )
-    weapons: list[str] = Field(
-        description="Descriptions of weapons or tools.",
-        examples=[["kitchen knife", "metal crowbar"]]
-    )
-    descriptions: list[str] = Field(
-        description="Suspect or witness physical descriptions.",
-        examples=[["White male, mid-30s, wearing a black tracksuit"]]
-    )
-    contact_info: list[str] = Field(
-        description="Any phone numbers, emails, or contact details.",
-        examples=[["+44 7911 123456", "witness@mail.co.uk"]]
-    )
-    summary: str = Field(
-        description="A brief summary of the incident(s) covered in the document.",
-        examples=["Burglary occurred at 221B Baker Street around 10PM. Daniel Smith was the victim."]
-    )
-
+    people: list[str]
+    relationships: list[str]
+    roles: dict[str, str]
+    times: list[str]
+    time_event_map: dict[str, str]
+    locations: list[str]
+    events: list[str]
+    vehicles: list[dict]
+    weapons: list[str]
+    descriptions: list[str]
+    contact_info: list[str]
+    summary: str
+    structured_people: Optional[list[StructuredPerson]] = None
+    structured_events: Optional[list[StructuredEvent]] = None
 
 class FunctionReponseModel(BaseModel):
-    """
-    Defines the schema that will be returned by the function. We'll use this to
-    ensure that the response contains the correct values and structure, and
-    to allow a partially filled response to be returned in case of an error.
-    """
-
-    success: bool = Field(
-        False, description="Indicates whether the pipeline was successful."
-    )
-    result: Optional[LLMInvestigationExtractionModel] = Field(
-        None, description="The final result of the pipeline."
-    )
-    func_time_taken_secs: Optional[float] = Field(
-        None, description="The total time taken to process the request."
-    )
-    error_text: Optional[str] = Field(
-        None,
-        description="If an error occurred, this field will contain the error message.",
-    )
-    di_extracted_text: Optional[str] = Field(
-        None, description="The raw text content extracted by Document Intelligence."
-    )
-    di_raw_response: Optional[dict] = Field(
-        None, description="The raw API response from Document Intelligence."
-    )
-    di_time_taken_secs: Optional[float] = Field(
-        None,
-        description="The time taken to extract the text using Document Intelligence.",
-    )
-    llm_input_messages: Optional[list[dict]] = Field(
-        None, description="The messages that were sent to the LLM."
-    )
-    llm_reply_message: Optional[dict] = Field(
-        default=None, description="The message that was received from the LLM."
-    )
-    llm_raw_response: Optional[str] = Field(
-        None, description="The raw text response from the LLM."
-    )
-    llm_time_taken_secs: Optional[float] = Field(
-        None, description="The time taken to receive a response from the LLM."
-    )
-
-
-LLM_SYSTEM_PROMPT = (
-    "Your task is to review the following information and extract all city names that appear in the text.\n"
-    f"{LLMCityNamesModel.get_prompt_json_example(include_preceding_json_instructions=True)}"
-)
+    success: bool = Field(False)
+    result: Optional[LLMInvestigationExtractionModel] = None
+    func_time_taken_secs: Optional[float] = None
+    error_text: Optional[str] = None
+    di_extracted_text: Optional[str] = None
+    di_raw_response: Optional[dict] = None
+    di_time_taken_secs: Optional[float] = None
+    llm_input_messages: Optional[list[dict]] = None
+    llm_reply_message: Optional[dict] = None
+    llm_raw_response: Optional[str] = None
+    llm_time_taken_secs: Optional[float] = None
 
 LLM_INVESTIGATION_PROMPT = (
-    "You are a digital investigator helping police review a document for leads. "
-    "Extract structured information from the text and return it as a valid JSON object matching the schema below.\n\n"
-    "Important instructions:\n"
-    "- Only include times where something happened (e.g., a crime, report, vehicle sighting).\n"
-    "- The `times` list should contain these meaningful times.\n"
-    "- For each time, include a matching entry in `time_event_map` that explains what occurred (e.g., 'Knife assault at 273 Baker Street').\n"
-    "- The `roles` field must be a dictionary mapping each person to their role (e.g., 'Daniel Smith': 'suspect').\n"
-    "- The `relationships` field should describe how people are connected in the incidents.\n"
-    "- Include a `summary` giving a brief overview of the events in the document.\n"
-    "- Also extract: locations, events, vehicles, weapons, physical descriptions, and contact info.\n\n"
-    f"{LLMInvestigationExtractionModel.get_prompt_json_example(include_preceding_json_instructions=True)}"
+    "You are a digital case analyst reviewing a police report.\n\n"
+    "Return a structured JSON object that follows this schema and captures key information and relationships.\n\n"
+    "Flat fields:\n"
+    "- people: List all individuals mentioned in the report.\n"
+    "- roles: Map each person's name to their role (e.g., 'Daniel Smith': 'suspect').\n"
+    "- relationships: Describe how individuals are connected (e.g., 'X is married to Y', 'X is solicitor for Y').\n"
+    "- locations: Include addresses, cities, or institutions.\n"
+    "- events: Major incidents (e.g., robbery, assault).\n"
+    "- vehicles: Each entry must be an object with keys 'description', 'reg_number', and optionally 'owner'.\n"
+    "- weapons: Descriptions of any weapons or offensive items.\n"
+    "- descriptions: A list of clothing or physical descriptions as plain strings.\n"
+    "- contact_info: Phone numbers, emails, etc.\n"
+    "- time_event_map: A dictionary mapping each timestamp to what happened.\n"
+    "- summary: A brief, readable summary of the incident.\n\n"
+    "Structured fields:\n"
+    "- structured_people: Each object must have name, role, affiliations, vehicles (as objects), contact_info, and locations.\n"
+    "- structured_events: Each object must include type, datetime, location, suspects, officers, vehicles (as objects), and witness_description (as a single string).\n\n"
+    "Guidelines:\n"
+    "- Use exact field names from this schema.\n"
+    "- Do not rename keys (e.g., do not use 'vehicles_involved' instead of 'vehicles').\n"
+    "- Ensure relationships is a list of strings.\n"
+    "- Ensure descriptions are a list of plain strings, not objects.\n"
+    "- witness_description must be a single string.\n"
+    "- Output must be valid JSON matching this structure.\n"
 )
-
- 
 
 @bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
 def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
     logging.info(f"Python HTTP trigger function `{FUNCTION_ROUTE}` received a request.")
-    # Create the object to hold all intermediate and final values. We will progressively update
-    # values as each stage of the pipeline is completed, allowing us to return a partial
-    # response in case of an error at any stage.
     output_model = FunctionReponseModel(success=False)
     try:
-        # Create an error_text variable. This will be updated as we move through
-        # the pipeline so that if a step fails, the error_text var reflects what
-        # has failed. If all steps complete successfully, the var is never used.
         error_text = "An error occurred during processing."
         error_code = 422
 
         func_timer = MeasureRunTime()
         func_timer.start()
 
-        # Check mime_type of the request data
         mime_type = req.headers.get("Content-Type")
         if mime_type not in VALID_DI_PREBUILT_READ_LAYOUT_MIME_TYPES:
             return func.HttpResponse(
-                "This function only supports a Content-Type of {}. Supplied file is of type {}".format(
-                    ", ".join(VALID_DI_PREBUILT_READ_LAYOUT_MIME_TYPES), mime_type
-                ),
+                f"This function only supports a Content-Type of {', '.join(VALID_DI_PREBUILT_READ_LAYOUT_MIME_TYPES)}. Supplied file is of type {mime_type}",
                 status_code=422,
             )
 
-        ### Check the request body
         req_body = req.get_body()
         if len(req_body) == 0:
             return func.HttpResponse(
                 "Please provide a base64 encoded PDF in the request body.",
                 status_code=422,
             )
-        ### 1. Load the images from the PDF/image input
+
         error_text = "An error occurred during image extraction."
         error_code = 500
         doc_page_imgs = load_visual_obj_bytes_to_pil_imgs_dict(
             req_body, mime_type, starting_idx=1, pdf_img_dpi=100
         )
-        ### Extract the text using Document Intelligence
+
         error_text = "An error occurred during Document Intelligence extraction."
         with MeasureRunTime() as di_timer:
             poller = di_client.begin_analyze_document(
@@ -267,41 +185,69 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
             doc.content for doc in processed_content_docs if doc.content is not None
         )
         output_model.di_time_taken_secs = di_timer.time_taken
-        ### 3. Create the messages to send to the LLM in the following order:
-        #      i. System prompt
-        #      ii. Extracted text and images from Document Intelligence
+
         error_text = "An error occurred while creating the LLM input messages."
-        # Convert chunk content to OpenAI messages
         content_openai_message = convert_processed_di_docs_to_openai_message(
             merged_processed_content_docs, role="user"
         )
         input_messages = [
-            {
-                "role": "system",
-                "content": LLM_INVESTIGATION_PROMPT,
-            },
+            {"role": "system", "content": LLM_INVESTIGATION_PROMPT},
             content_openai_message,
         ]
         output_model.llm_input_messages = input_messages
 
-        ### 4. Send request to LLM
         error_text = "An error occurred when sending the LLM request."
         with MeasureRunTime() as llm_timer:
             llm_result = aoai_client.chat.completions.create(
                 messages=input_messages,
                 model=AOAI_LLM_DEPLOYMENT,
-                response_format={"type": "json_object"},  # Ensure we get JSON responses
+                response_format={"type": "json_object"},
             )
         output_model.llm_time_taken_secs = llm_timer.time_taken
-        ### 5. Validate that the LLM response matches the expected schema
+
         error_text = "An error occurred when validating the LLM's returned response into the expected schema."
         output_model.llm_reply_message = llm_result.choices[0].to_dict()
         output_model.llm_raw_response = llm_result.choices[0].message.content
-        llm_structured_response = LLMInvestigationExtractionModel(
-            **json.loads(llm_result.choices[0].message.content)
-        )
+
+        raw_json = json.loads(llm_result.choices[0].message.content)
+
+        raw_json.setdefault("people", [])
+        raw_json.setdefault("relationships", [])
+        raw_json.setdefault("roles", {})
+        raw_json.setdefault("times", list(raw_json.get("time_event_map", {}).keys()))
+        raw_json.setdefault("time_event_map", {})
+        raw_json.setdefault("locations", [])
+        raw_json.setdefault("events", [])
+        raw_json.setdefault("vehicles", [])
+        raw_json.setdefault("weapons", [])
+        raw_json.setdefault("descriptions", [])
+        raw_json.setdefault("contact_info", [])
+        raw_json.setdefault("summary", "")
+
+        if "vehicles" in raw_json:
+            raw_json["vehicles"] = [
+                v for v in raw_json["vehicles"] if isinstance(v, dict) and "description" in v and "reg_number" in v
+            ]
+
+        if "descriptions" in raw_json:
+            raw_json["descriptions"] = [d for d in raw_json["descriptions"] if isinstance(d, str)]
+
+        if "contact_info" in raw_json and not isinstance(raw_json["contact_info"], list):
+            raw_json["contact_info"] = []
+
+        if "structured_people" in raw_json:
+            for p in raw_json["structured_people"]:
+                if "vehicles" in p and isinstance(p["vehicles"], list):
+                    p["vehicles"] = [v for v in p["vehicles"] if isinstance(v, dict)]
+
+        if "structured_events" in raw_json:
+            for e in raw_json["structured_events"]:
+                if isinstance(e.get("witness_description"), list):
+                    e["witness_description"] = "; ".join(map(str, e["witness_description"]))
+
+        llm_structured_response = LLMInvestigationExtractionModel(**raw_json)
         output_model.result = llm_structured_response
-        ### 8. All steps completed successfully, set success=True and return the final result
+
         output_model.success = True
         output_model.func_time_taken_secs = func_timer.stop()
         return func.HttpResponse(
@@ -310,8 +256,6 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
             status_code=200,
         )
     except Exception as _e:
-        # If an error occurred at any stage, return the partial response. Update the error_text
-        # field to contain the error message, and ensure success=False.
         output_model.success = False
         output_model.error_text = error_text
         output_model.func_time_taken_secs = func_timer.stop()
@@ -321,3 +265,4 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=error_code,
         )
+

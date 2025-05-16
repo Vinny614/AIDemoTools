@@ -1784,11 +1784,22 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
             return "No result found in response."
  
         md_lines = []
+ 
         for key, value in fields.items():
+            title = key.replace("_", " ").title()
             if isinstance(value, list) and value:
-                md_lines.append(f"### {key.replace('_', ' ').title()}")
+                md_lines.append(f"### {title}")
                 for item in value:
                     md_lines.append(f"- {item}")
+                md_lines.append("")
+            elif isinstance(value, dict) and value:
+                md_lines.append(f"### {title}")
+                for k, v in value.items():
+                    md_lines.append(f"- **{k}**: {v}")
+                md_lines.append("")
+            elif isinstance(value, str) and value.strip():
+                md_lines.append(f"### {title}")
+                md_lines.append(value.strip())
                 md_lines.append("")
  
         return "\n".join(md_lines) if md_lines else "No fields extracted."
