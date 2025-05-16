@@ -93,13 +93,25 @@ class LLMInvestigationExtractionModel(LLMResponseBaseModel):
         description="Names of people mentioned in the text.",
         examples=[["Daniel Smith", "PC Rachel Jones"]]
     )
-    locations: list[str] = Field(
-        description="Addresses or places described.",
-        examples=[["221B Baker Street, London", "Piccadilly Circus"]]
+    relationships: list[str] = Field(
+        description="Descriptions of relationships between people (e.g., suspect-victim, officer-witness).",
+        examples=[["Daniel Smith is the victim", "PC Rachel Jones is the investigating officer"]]
+    )
+    roles: dict[str, str] = Field(
+        description="Map of person names to their roles (e.g. 'Daniel Smith': 'victim').",
+        examples=[{"Daniel Smith": "victim", "Rachel Jones": "officer"}]
     )
     times: list[str] = Field(
         description="Dates and times of events.",
         examples=[["3 April 2023, 22:15", "half past nine in the evening"]]
+    )
+    time_event_map: dict[str, str] = Field(
+        description="Map of times to what happened at that time.",
+        examples=[{"3 April 2023, 22:15": "Burglary occurred at 221B Baker Street"}]
+    )
+    locations: list[str] = Field(
+        description="Addresses or places described.",
+        examples=[["221B Baker Street, London", "Piccadilly Circus"]]
     )
     events: list[str] = Field(
         description="Crimes or key incidents described.",
@@ -121,6 +133,11 @@ class LLMInvestigationExtractionModel(LLMResponseBaseModel):
         description="Any phone numbers, emails, or contact details.",
         examples=[["+44 7911 123456", "witness@mail.co.uk"]]
     )
+    summary: str = Field(
+        description="A brief summary of the incident(s) covered in the document.",
+        examples=["Burglary occurred at 221B Baker Street around 10PM. Daniel Smith was the victim."]
+    )
+
 
 class FunctionReponseModel(BaseModel):
     """
@@ -172,10 +189,20 @@ LLM_SYSTEM_PROMPT = (
 )
 
 LLM_INVESTIGATION_PROMPT = (
-    "You are a digital investigator helping police review text for leads. "
-    "Extract the following information and return it as a structured JSON object:\n"
+    "You are a digital investigator helping police review a document for leads. "
+    "Extract structured information from the text and return it as a valid JSON object matching the schema below.\n\n"
+    "Important instructions:\n"
+    "- Only include times where something happened (e.g., a crime, report, vehicle sighting).\n"
+    "- The `times` list should contain these meaningful times.\n"
+    "- For each time, include a matching entry in `time_event_map` that explains what occurred (e.g., 'Knife assault at 273 Baker Street').\n"
+    "- The `roles` field must be a dictionary mapping each person to their role (e.g., 'Daniel Smith': 'suspect').\n"
+    "- The `relationships` field should describe how people are connected in the incidents.\n"
+    "- Include a `summary` giving a brief overview of the events in the document.\n"
+    "- Also extract: locations, events, vehicles, weapons, physical descriptions, and contact info.\n\n"
     f"{LLMInvestigationExtractionModel.get_prompt_json_example(include_preceding_json_instructions=True)}"
 )
+
+ 
 
 @bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
 def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
