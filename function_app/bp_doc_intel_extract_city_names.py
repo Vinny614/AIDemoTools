@@ -92,7 +92,10 @@ class LLMInvestigationExtractionModel(LLMResponseBaseModel):
     structured_people: Optional[list[StructuredPerson]] = None
     structured_events: Optional[list[StructuredEvent]] = None
 
-class FunctionReponseModel(BaseModel):
+class FunctionResponseModel(BaseModel):  # Typo fixed here
+    """
+    Response model for the doc_intel_extract_city_names function.
+    """
     success: bool = Field(False)
     result: Optional[LLMInvestigationExtractionModel] = None
     func_time_taken_secs: Optional[float] = None
@@ -104,6 +107,46 @@ class FunctionReponseModel(BaseModel):
     llm_reply_message: Optional[dict] = None
     llm_raw_response: Optional[str] = None
     llm_time_taken_secs: Optional[float] = None
+
+def normalize_llm_response(raw_json: dict) -> dict:
+    """
+    Normalize and sanitize the LLM response to match the expected schema.
+    """
+    raw_json.setdefault("people", [])
+    raw_json.setdefault("relationships", [])
+    raw_json.setdefault("roles", {})
+    raw_json.setdefault("times", list(raw_json.get("time_event_map", {}).keys()))
+    raw_json.setdefault("time_event_map", {})
+    raw_json.setdefault("locations", [])
+    raw_json.setdefault("events", [])
+    raw_json.setdefault("vehicles", [])
+    raw_json.setdefault("weapons", [])
+    raw_json.setdefault("descriptions", [])
+    raw_json.setdefault("contact_info", [])
+    raw_json.setdefault("summary", "")
+
+    if "vehicles" in raw_json:
+        raw_json["vehicles"] = [
+            v for v in raw_json["vehicles"] if isinstance(v, dict) and "description" in v and "reg_number" in v
+        ]
+
+    if "descriptions" in raw_json:
+        raw_json["descriptions"] = [d for d in raw_json["descriptions"] if isinstance(d, str)]
+
+    if "contact_info" in raw_json and not isinstance(raw_json["contact_info"], list):
+        raw_json["contact_info"] = []
+
+    if "structured_people" in raw_json:
+        for p in raw_json["structured_people"]:
+            if "vehicles" in p and isinstance(p["vehicles"], list):
+                p["vehicles"] = [v for v in p["vehicles"] if isinstance(v, dict)]
+
+    if "structured_events" in raw_json:
+        for e in raw_json["structured_events"]:
+            if isinstance(e.get("witness_description"), list):
+                e["witness_description"] = "; ".join(map(str, e["witness_description"]))
+
+    return raw_json
 
 LLM_INVESTIGATION_PROMPT = (
     "You are a digital case analyst reviewing a police report.\n\n"
@@ -134,8 +177,11 @@ LLM_INVESTIGATION_PROMPT = (
 
 @bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
 def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Azure Function to extract structured city name and incident information from a police report.
+    """
     logging.info(f"Python HTTP trigger function `{FUNCTION_ROUTE}` received a request.")
-    output_model = FunctionReponseModel(success=False)
+    output_model = FunctionResponseModel(success=False)
     try:
         error_text = "An error occurred during processing."
         error_code = 422
@@ -159,6 +205,7 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
 
         error_text = "An error occurred during image extraction."
         error_code = 500
+        logging.info("Extracting images from document...")
         doc_page_imgs = load_visual_obj_bytes_to_pil_imgs_dict(
             req_body, mime_type, starting_idx=1, pdf_img_dpi=100
         )
@@ -210,46 +257,13 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
         output_model.llm_raw_response = llm_result.choices[0].message.content
 
         raw_json = json.loads(llm_result.choices[0].message.content)
-
-        raw_json.setdefault("people", [])
-        raw_json.setdefault("relationships", [])
-        raw_json.setdefault("roles", {})
-        raw_json.setdefault("times", list(raw_json.get("time_event_map", {}).keys()))
-        raw_json.setdefault("time_event_map", {})
-        raw_json.setdefault("locations", [])
-        raw_json.setdefault("events", [])
-        raw_json.setdefault("vehicles", [])
-        raw_json.setdefault("weapons", [])
-        raw_json.setdefault("descriptions", [])
-        raw_json.setdefault("contact_info", [])
-        raw_json.setdefault("summary", "")
-
-        if "vehicles" in raw_json:
-            raw_json["vehicles"] = [
-                v for v in raw_json["vehicles"] if isinstance(v, dict) and "description" in v and "reg_number" in v
-            ]
-
-        if "descriptions" in raw_json:
-            raw_json["descriptions"] = [d for d in raw_json["descriptions"] if isinstance(d, str)]
-
-        if "contact_info" in raw_json and not isinstance(raw_json["contact_info"], list):
-            raw_json["contact_info"] = []
-
-        if "structured_people" in raw_json:
-            for p in raw_json["structured_people"]:
-                if "vehicles" in p and isinstance(p["vehicles"], list):
-                    p["vehicles"] = [v for v in p["vehicles"] if isinstance(v, dict)]
-
-        if "structured_events" in raw_json:
-            for e in raw_json["structured_events"]:
-                if isinstance(e.get("witness_description"), list):
-                    e["witness_description"] = "; ".join(map(str, e["witness_description"]))
-
+        raw_json = normalize_llm_response(raw_json)
         llm_structured_response = LLMInvestigationExtractionModel(**raw_json)
         output_model.result = llm_structured_response
 
         output_model.success = True
         output_model.func_time_taken_secs = func_timer.stop()
+        logging.info("Function completed successfully.")
         return func.HttpResponse(
             body=output_model.model_dump_json(),
             mimetype="application/json",
@@ -265,4 +279,3 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=error_code,
         )
-

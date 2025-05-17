@@ -1778,32 +1778,69 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
     def format_investigation_fields(response_json: dict) -> str:
         if not isinstance(response_json, dict):
             return "Invalid response format."
- 
+
         fields = response_json.get("result", {})
         if not fields:
             return "No result found in response."
- 
+
         md_lines = []
- 
+
         for key, value in fields.items():
-            title = key.replace("_", " ").title()
-            if isinstance(value, list) and value:
-                md_lines.append(f"### {title}")
-                for item in value:
-                    md_lines.append(f"- {item}")
+            if key == "structured_people" and value:
+                md_lines.append("### Structured People")
+                for person in value:
+                    md_lines.append(f"- **Name:** {person.get('name', '')}")
+                    if person.get("role"):
+                        md_lines.append(f"    - Role: {person['role']}")
+                    if person.get("affiliations"):
+                        md_lines.append(f"    - Affiliations: {', '.join(person['affiliations'])}")
+                    if person.get("vehicles"):
+                        for v in person["vehicles"]:
+                            md_lines.append(f"    - Vehicle: {v.get('description', '')} ({v.get('reg_number', '')})")
+                    if person.get("locations"):
+                        md_lines.append(f"    - Locations: {', '.join(person['locations'])}")
+                    if person.get("contact_info"):
+                        md_lines.append(f"    - Contact Info: {', '.join(person['contact_info'])}")
                 md_lines.append("")
-            elif isinstance(value, dict) and value:
-                md_lines.append(f"### {title}")
-                for k, v in value.items():
-                    md_lines.append(f"- **{k}**: {v}")
+            elif key == "structured_events" and value:
+                md_lines.append("### Structured Events")
+                for event in value:
+                    md_lines.append(f"- **Type:** {event.get('type', '')}")
+                    if event.get("datetime"):
+                        md_lines.append(f"    - Datetime: {event['datetime']}")
+                    if event.get("location"):
+                        md_lines.append(f"    - Location: {event['location']}")
+                    if event.get("suspects"):
+                        md_lines.append(f"    - Suspects: {', '.join(event['suspects'])}")
+                    if event.get("officers"):
+                        md_lines.append(f"    - Officers: {', '.join(event['officers'])}")
+                    if event.get("vehicles"):
+                        for v in event["vehicles"]:
+                            md_lines.append(f"    - Vehicle: {v.get('description', '')} ({v.get('reg_number', '')})")
+                    if event.get("witness_description"):
+                        md_lines.append(f"    - Witness Description: {event['witness_description']}")
                 md_lines.append("")
-            elif isinstance(value, str) and value.strip():
-                md_lines.append(f"### {title}")
-                md_lines.append(value.strip())
-                md_lines.append("")
- 
+            elif key == "times":
+                continue
+            else:
+                title = key.replace("_", " ").title()
+                if isinstance(value, list) and value:
+                    md_lines.append(f"### {title}")
+                    for item in value:
+                        md_lines.append(f"- {item}")
+                    md_lines.append("")
+                elif isinstance(value, dict) and value:
+                    md_lines.append(f"### {title}")
+                    for k, v in value.items():
+                        md_lines.append(f"- **{k}**: {v}")
+                    md_lines.append("")
+                elif isinstance(value, str) and value.strip():
+                    md_lines.append(f"### {title}")
+                    md_lines.append(value.strip())
+                    md_lines.append("")
+
         return "\n".join(md_lines) if md_lines else "No fields extracted."
- 
+
     # Upload + API call handler
     def di_llm_ext_names_upload(file: str):
         mime_type = mimetypes.guess_type(file)[0]
@@ -1818,7 +1855,7 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
             )
         formatted_md = format_investigation_fields(response)
         return status_code, time_taken, formatted_md, response
- 
+
     # UI components
     di_llm_ext_names_instructions = gr.Markdown(
         (
@@ -1832,7 +1869,7 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
         ),
         show_label=False,
     )
- 
+
     with gr.Row():
         di_llm_ext_names_file_upload = gr.File(
             label="Upload File. To upload a different file, Hit the 'X' button to the top right of this element ->",
@@ -1842,7 +1879,7 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
         di_llm_ext_names_input_thumbs = gr.Gallery(
             label="File Preview", object_fit="contain", visible=True
         )
- 
+
     di_llm_ext_names_examples = gr.Examples(
         examples=DEMO_VISION_FILES,
         inputs=[di_llm_ext_names_file_upload],
@@ -1851,9 +1888,9 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
         fn=render_visual_media_input,
         run_on_click=True,
     )
- 
+
     form_ext_w_conf_process_btn = gr.Button("Process File", variant="primary")
- 
+
     with gr.Column() as di_llm_ext_names_output_row:
         di_llm_ext_names_output_label = gr.Label(value="API Response", show_label=False)
         with gr.Row():
@@ -1861,7 +1898,7 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
             di_llm_ext_names_time_taken = gr.Textbox(label="Time Taken", interactive=False)
         di_llm_ext_names_output_md = gr.Markdown(label="Formatted Response")
         di_llm_ext_names_output_json = gr.JSON(label="API Response")
- 
+
     form_ext_w_conf_process_btn.click(
         fn=di_llm_ext_names_upload,
         inputs=[di_llm_ext_names_file_upload],
