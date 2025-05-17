@@ -301,6 +301,7 @@ def send_request(
     files: Optional[dict] = None,
     headers: Optional[dict] = None,
     force_json_content_type: bool = True,
+    timeout: float = 60.0,  # Add a timeout parameter with a default value
 ) -> tuple[int, float, Union[str, dict]]:
     """Sends a POST request to the specified route on the function host."""
     if FUNCTION_KEY:
@@ -313,6 +314,7 @@ def send_request(
         data=data,
         files=files,
         headers=headers,
+        timeout=timeout,  # Pass the timeout to requests.post
     )
     client_side_time_taken = f"{round(time.time() - start_time, 1)} seconds"
     # Check if the response is valid JSON
@@ -550,6 +552,7 @@ with gr.Blocks(analytics_enabled=False) as simple_cu_examples_block:
     def prebuilt_cu_document_process(
         analyzer_id: str,
         file: str,
+        timeout: float = 120.0,  # Allow user to specify a longer timeout for large/complex docs
     ):
         analyzer_route = "content_understanding_document"
         processing_start_time = None
@@ -574,6 +577,7 @@ with gr.Blocks(analytics_enabled=False) as simple_cu_examples_block:
                     route=analyzer_route,
                     files=files,
                     force_json_content_type=True,
+                    timeout=timeout,  # Pass through the timeout
                 )
             # Format image and field outputs (if available in the response)
             if isinstance(response, dict) and response.get("formatted_fields_md"):
