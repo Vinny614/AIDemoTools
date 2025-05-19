@@ -2126,7 +2126,7 @@ with gr.Blocks(
 ) as demo:
     gr.Markdown(
         (
-            "## Azure AI Services + OpenAI Pipeline Demos\n"
+            "## Azure AI Services + OpenAI Pipeline Demos v0.5\n"
             "\n\nThis demo app showcases a few examples of different processing pipelines that incorporate Azure AI "
             "Services and Azure OpenAI. Click through the tabs to see examples of different processing pipelines.\n\n"
             "This app is based on the [Azure Multimodal AI & LLM Processing Accelerator]"

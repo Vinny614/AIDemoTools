@@ -59,6 +59,7 @@ doc_intel_result_processor = DocumentIntelligenceProcessor(
     ),
 )
 
+
 class StructuredPerson(BaseModel):
     name: str
     role: Optional[str] = None
@@ -66,6 +67,7 @@ class StructuredPerson(BaseModel):
     vehicles: Optional[list[dict]] = None
     locations: Optional[list[str]] = None
     contact_info: Optional[list[str]] = None
+
 
 class StructuredEvent(BaseModel):
     type: str
@@ -75,6 +77,7 @@ class StructuredEvent(BaseModel):
     officers: Optional[list[str]] = None
     vehicles: Optional[list[dict]] = None
     witness_description: Optional[str] = None
+
 
 class LLMInvestigationExtractionModel(LLMResponseBaseModel):
     people: list[str]
@@ -92,10 +95,12 @@ class LLMInvestigationExtractionModel(LLMResponseBaseModel):
     structured_people: Optional[list[StructuredPerson]] = None
     structured_events: Optional[list[StructuredEvent]] = None
 
+
 class FunctionResponseModel(BaseModel):  # Typo fixed here
     """
     Response model for the doc_intel_extract_city_names function.
     """
+
     success: bool = Field(False)
     result: Optional[LLMInvestigationExtractionModel] = None
     func_time_taken_secs: Optional[float] = None
@@ -108,10 +113,12 @@ class FunctionResponseModel(BaseModel):  # Typo fixed here
     llm_raw_response: Optional[str] = None
     llm_time_taken_secs: Optional[float] = None
 
+
 def normalize_llm_response(raw_json: dict) -> dict:
     """
     Normalize and sanitize the LLM response to match the expected schema.
     """
+    # Always set defaults for ALL expected fields
     raw_json.setdefault("people", [])
     raw_json.setdefault("relationships", [])
     raw_json.setdefault("roles", {})
@@ -124,29 +131,71 @@ def normalize_llm_response(raw_json: dict) -> dict:
     raw_json.setdefault("descriptions", [])
     raw_json.setdefault("contact_info", [])
     raw_json.setdefault("summary", "")
+    raw_json.setdefault("structured_people", [])
+    raw_json.setdefault("structured_events", [])
+
+    # Vehicles must be a list of dicts with specific keys
 
     if "vehicles" in raw_json:
         raw_json["vehicles"] = [
-            v for v in raw_json["vehicles"] if isinstance(v, dict) and "description" in v and "reg_number" in v
+            v
+            for v in raw_json["vehicles"]
+            if isinstance(v, dict) and "description" in v and "reg_number" in v
         ]
+    # Descriptions must be a list of strings
 
     if "descriptions" in raw_json:
-        raw_json["descriptions"] = [d for d in raw_json["descriptions"] if isinstance(d, str)]
+        raw_json["descriptions"] = [
+            d for d in raw_json["descriptions"] if isinstance(d, str)
+        ]
 
-    if "contact_info" in raw_json and not isinstance(raw_json["contact_info"], list):
-        raw_json["contact_info"] = []
+    # contact_info must be a list of strings, never a dict
+    if "contact_info" in raw_json:
+        if isinstance(raw_json["contact_info"], dict):
+            raw_json["contact_info"] = [
+                str(v) for v in raw_json["contact_info"].values() if isinstance(v, str)
+            ]
+        elif not isinstance(raw_json["contact_info"], list):
+            raw_json["contact_info"] = []
+
+    # Fix structured_people entries.
 
     if "structured_people" in raw_json:
         for p in raw_json["structured_people"]:
+            # contact_info: must be a list
+            if "contact_info" in p:
+                if isinstance(p["contact_info"], dict):
+                    p["contact_info"] = [
+                        str(v) for v in p["contact_info"].values() if isinstance(v, str)
+                    ]
+                elif not isinstance(p["contact_info"], list):
+                    p["contact_info"] = []
+
+            # affiliations: must be a list.
+            if "affiliations" in p:
+                if isinstance(p["affiliations"], str):
+                    p["affiliations"] = (
+                        [] if not p["affiliations"].strip() else [p["affiliations"]]
+                    )
+                elif not isinstance(p["affiliations"], list):
+                    p["affiliations"] = []
+
+            # vehicles: must be a list of dicts
+
             if "vehicles" in p and isinstance(p["vehicles"], list):
                 p["vehicles"] = [v for v in p["vehicles"] if isinstance(v, dict)]
+
+    # Fix witness_description in structured_events..
 
     if "structured_events" in raw_json:
         for e in raw_json["structured_events"]:
             if isinstance(e.get("witness_description"), list):
                 e["witness_description"] = "; ".join(map(str, e["witness_description"]))
+            if "type" in e and not isinstance(e["type"], str):
+                e["type"] = ""
 
     return raw_json
+
 
 LLM_INVESTIGATION_PROMPT = (
     "You are a digital case analyst reviewing a police report.\n\n"
@@ -173,7 +222,9 @@ LLM_INVESTIGATION_PROMPT = (
     "- Ensure descriptions are a list of plain strings, not objects.\n"
     "- witness_description must be a single string.\n"
     "- Output must be valid JSON matching this structure.\n"
+    "- Ensure contact_info is a list of plain strings, (never a dictionary or object).\n"
 )
+
 
 @bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
 def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
