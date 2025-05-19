@@ -312,6 +312,16 @@ def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
         llm_structured_response = LLMInvestigationExtractionModel(**raw_json)
         output_model.result = llm_structured_response
 
+        # Optional: Tidy logging for debugging
+        if output_model.result and output_model.result.structured_people:
+            logging.debug("Structured People:\n%s", json.dumps(
+                [p.model_dump() for p in output_model.result.structured_people], indent=2
+            ))
+        if output_model.result and output_model.result.structured_events:
+            logging.debug("Structured Events:\n%s", json.dumps(
+                [e.model_dump() for e in output_model.result.structured_events], indent=2
+            ))
+
         output_model.success = True
         output_model.func_time_taken_secs = func_timer.stop()
         logging.info("Function completed successfully.")
