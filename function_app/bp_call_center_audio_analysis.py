@@ -208,7 +208,7 @@ class FunctionReponseModel(BaseModel):
 
 LLM_SYSTEM_PROMPT = (
     "You are an assistant specializing in summarizing and analyzing investigative, legal, or incident-related audio footage.\n"
-    "Your task is to review any kind of audio recording (statements, interviews, on-scene or ambient audio, etc) and extract all key information, including main events, participants, sounds, and recommended next steps.\n"
+    "Your task is to review any kind of audio recording (statements, interviews, on-scene or ambient audio, etc) and extract all key information, including main events, participants, sounds, and more.\n"
     "Respond ONLY in the following JSON format. Do not include any commentary or explanation.\n"
     "{\n"
     '  "audio_summary": "A summary of the audio footage, including main events, participants, and key details. No more than 20 words.",\n'
@@ -238,8 +238,12 @@ async def call_center_audio_analysis(
         func_timer.start()
 
         # Check the request body
+        logging.info("Step 1: Checking request body")
         request_json_content = json.loads(req.files["json"].read().decode("utf-8"))
+
+        logging.info("Step 2: Validating transcription method")
         transcription_method = request_json_content["method"]
+        logging.info(f"Step 3: Got transcription method: {transcription_method}")
         if transcription_method not in TRANSCRIPTION_METHOD_TO_MIME_MAPPER:
             output_model.error_text = f"Invalid transcription method `{transcription_method}`. Please use one of {list(TRANSCRIPTION_METHOD_TO_MIME_MAPPER.keys())}"
             logging.exception(output_model.error_text)
@@ -266,6 +270,7 @@ async def call_center_audio_analysis(
         # Get the transcription result
         error_text = "An error occurred during audio transcription."
         error_code = 500
+        logging.info("Step 4: Starting audio transcription")
         with MeasureRunTime() as speech_timer:
             if transcription_method == "fast":
                 transcription, raw_transcription_api_response = (
@@ -284,6 +289,10 @@ async def call_center_audio_analysis(
                         **aoai_whisper_kwargs,
                     )
                 )
+        logging.info("Step 5: Audio transcription complete")
+        logging.debug(f"Raw transcription API response: {raw_transcription_api_response}")
+
+        logging.info("Step 6: Formatting transcription text")
         formatted_transcription_text = transcription.to_formatted_str(
             transcription_prefix_format="Language: {language}\nDuration: {formatted_duration} minutes\n\nAudio:\n",
             phrase_format="[{start_min}:{start_sub_sec}] {auto_phrase_source_name} {auto_phrase_source_id}: {display_text}",
@@ -293,6 +302,7 @@ async def call_center_audio_analysis(
         output_model.speech_time_taken_secs = speech_timer.time_taken
         # LLM input
         error_text = "An error occurred while creating the LLM input messages."
+        logging.info("Step 7: Preparing LLM input messages")
         input_messages = [
             {
                 "role": "system",
@@ -304,8 +314,10 @@ async def call_center_audio_analysis(
             },
         ]
         output_model.llm_input_messages = input_messages
+        logging.debug(f"LLM input messages: {input_messages}")
         # Send request to LLM
         error_text = "An error occurred when sending the LLM request."
+        logging.info("Step 8: Sending request to LLM")
         with MeasureRunTime() as llm_timer:
             llm_result = aoai_client.chat.completions.create(
                 messages=input_messages,
@@ -313,10 +325,13 @@ async def call_center_audio_analysis(
                 response_format={"type": "json_object"},  # Ensure we get JSON responses
             )
         output_model.llm_time_taken_secs = llm_timer.time_taken
+        logging.info("Step 9: LLM response received")
+        logging.debug(f"Raw LLM response: {llm_result.choices[0].message.content}")
         # Validate response schema
         error_text = "An error occurred when validating the LLM's returned response into the expected schema."
         output_model.llm_reply_message = llm_result.choices[0].to_dict()
         output_model.llm_raw_response = llm_result.choices[0].message.content
+        logging.info("Step 10: Parsing LLM response JSON")
         try:
             llm_structured_response = LLMRawResponseModel(
                 **json.loads(llm_result.choices[0].message.content)
@@ -384,8 +399,8 @@ async def call_center_audio_analysis(
             status_code=200,
         )
     except Exception as _e:
-        logging.exception("An error occurred during processing.")
-        output_model.error_text = error_text
+        logging.exception(f"An error occurred: {_e}")
+        output_model.error_text = f"{error_text} Details: {_e}"
         output_model.func_time_taken_secs = func_timer.stop()
         return func.HttpResponse(
             body=output_model.model_dump_json(),
