@@ -120,6 +120,31 @@ class ProcessedKeyWord(RawKeyword):
         description="The end time of the sentence in the audio recording.",
     )
 
+class KeyInformationItem(BaseModel):
+    type: str = Field(
+        description="The type of key information (e.g., person, location, event, object, sound).",
+        examples=["person", "location", "event", "object", "sound"],
+    )
+    value: str = Field(
+        description="The value or name of the key information.",
+        examples=["John Smith", "Main Street", "glass breaking"],
+    )
+    role: Optional[str] = Field(
+        default=None,
+        description="The role or description if relevant (e.g., witness, suspect, location of incident).",
+        examples=["witness", "suspect", "location of incident"],
+    )
+    timestamp: Optional[str] = Field(
+        default=None,
+        description="The timestamp in the audio where this information is mentioned.",
+        examples=["0:18"],
+    )
+    context: Optional[str] = Field(
+        default=None,
+        description="A short description or context for this key information.",
+        examples=["Describes the incident", "Where the event occurred"],
+    )
+
 class LLMRawResponseModel(LLMResponseBaseModel):
     """
     JSON schema for the LLM to follow for analysis of investigative or legal audio recordings.
@@ -147,18 +172,19 @@ class LLMRawResponseModel(LLMResponseBaseModel):
         description="The timestamp where the next action is mentioned.",
         examples=["6:12"],
     )
-    keywords: list[RawKeyword] = Field(
-        description=(
-            "A list of keywords or key phrases from the audio, such as names, locations, objects, or events. "
-            "Each should include the keyword and the timestamp of the sentence where it was said."
-        ),
+    key_information: list[KeyInformationItem] = Field(
+        description="A list of key information items extracted from the audio.",
         examples=[
             [
-                {"keyword": "car alarm", "timestamp": "0:18"},
-                {"keyword": "glass breaking", "timestamp": "1:42"},
-                {"keyword": "police siren", "timestamp": "4:29"},
+                {
+                    "type": "person",
+                    "value": "John Smith",
+                    "role": "witness",
+                    "timestamp": "0:18",
+                    "context": "Describes the incident"
+                }
             ]
-        ],
+        ]
     )
 
 class ProcessedResultModel(LLMRawResponseModel):
@@ -209,6 +235,7 @@ class FunctionReponseModel(BaseModel):
 LLM_SYSTEM_PROMPT = (
     "You are an assistant specialising in summarising and analyzing investigative, legal, or incident-related audio footage.\n"
     "Your task is to review any kind of audio recording (statements, interviews, on-scene or ambient audio, etc) and extract all key information, including main events, participants, sounds, and more.\n"
+    "For each key item, provide its type (e.g., person, location, event, object, sound), its value, and a short description or role if relevant.\n"
     "Respond ONLY in the following JSON format. Do not include any commentary or explanation.\n"
     "{\n"
     '  "audio_summary": "A summary of the audio footage, including main events, participants, and key details.",\n'
@@ -216,10 +243,10 @@ LLM_SYSTEM_PROMPT = (
     '  "participant_sentiment": "Calm",\n'
     '  "next_action": "Recommended next step after reviewing this audio. If none, return null.",\n'
     '  "next_action_sentence_timestamp": "6:12",\n'
-    '  "keywords": [\n'
-    '    {"keyword": "car alarm", "timestamp": "0:18"},\n'
-    '    {"keyword": "glass breaking", "timestamp": "1:42"},\n'
-    '    {"keyword": "police siren", "timestamp": "4:29"}\n'
+    '  "key_information": [\n'
+    '    {"type": "person", "value": "John Smith", "role": "witness", "timestamp": "0:18", "context": "Describes the incident"},\n'
+    '    {"type": "location", "value": "Main Street", "timestamp": "1:42", "context": "Where the event occurred"},\n'
+    '    {"type": "event", "value": "glass breaking", "timestamp": "2:10", "context": "Sound heard during the incident"}\n'
     "  ]\n"
     "}"
 )

@@ -1410,13 +1410,40 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                 md_lines.append(f"- **Next Action:** {next_action}{' at ' + next_action_ts if next_action_ts else ''}")
             md_lines.append("")
 
-        # Key Information: Keywords
+        # Key Information: Key Information Items (richer than keywords)
+        key_information = (
+            response_obj.get("result", {}).get("key_information")
+            or response_obj.get("key_information")
+            or []
+        )
+        if key_information:
+            md_lines.append("## 🏷️ Key Information: Entities, Events, People, Locations")
+            for item in key_information:
+                if isinstance(item, dict):
+                    type_ = item.get("type", "")
+                    value = item.get("value", "")
+                    role = item.get("role", "")
+                    ts = item.get("timestamp", "")
+                    context = item.get("context", "")
+                    line = f"- **{type_.title()}**: {value}"
+                    if role:
+                        line += f" ({role})"
+                    if ts:
+                        line += f" at {ts}"
+                    if context:
+                        line += f" — {context}"
+                    md_lines.append(line)
+                else:
+                    md_lines.append(f"- {item}")
+            md_lines.append("")
+
+        # Fallback: Keywords (for backward compatibility)
         keywords = (
             response_obj.get("result", {}).get("keywords")
             or response_obj.get("keywords")
             or []
         )
-        if keywords:
+        if keywords and not key_information:
             md_lines.append("## 🏷️ Key Information: Keywords")
             for kw in keywords:
                 if isinstance(kw, dict):
