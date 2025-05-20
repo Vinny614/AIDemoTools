@@ -2133,6 +2133,9 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
         ],
     )
 
+## Version Control ###
+##  v0.6 - Updated with markdown for Audio
+
 with gr.Blocks(
     title="Multimodal AI & LLM Processing Accelerator",
     theme=Base(),
