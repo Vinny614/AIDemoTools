@@ -416,7 +416,7 @@ async def call_center_audio_analysis(
         # Post-process keywords
         error_text = "An error occurred when post-processing the keywords."
         processed_keywords = []
-        for keyword in llm_structured_response.keywords:
+        for keyword in llm_structured_response.key_information:
             # Find the sentence in the transcription that contains the keyword.
             keyword_sentence_start_time_secs = int(
                 keyword.timestamp.split(":")[0]
@@ -425,7 +425,7 @@ async def call_center_audio_analysis(
                 phrase
                 for phrase in transcription.phrases
                 if is_value_in_content(
-                    keyword.keyword.lower(), phrase.display_text.lower()
+                    keyword.value.lower(), phrase.display_text.lower()
                 )
                 and is_phrase_start_time_match(
                     expected_start_time_secs=keyword_sentence_start_time_secs,
@@ -436,7 +436,8 @@ async def call_center_audio_analysis(
             if len(matching_phrases) == 1:
                 processed_keywords.append(
                     ProcessedKeyWord(
-                        **keyword.dict(),
+                        keyword=keyword.value,
+                        timestamp=keyword.timestamp,
                         keyword_matched_to_transcription_sentence=True,
                         full_sentence_text=matching_phrases[0].display_text,
                         sentence_confidence=matching_phrases[0].confidence,
@@ -447,13 +448,15 @@ async def call_center_audio_analysis(
             else:
                 processed_keywords.append(
                     ProcessedKeyWord(
-                        **keyword.dict(),
+                        keyword=keyword.value,
+                        timestamp=keyword.timestamp,
                         keyword_matched_to_transcription_sentence=False,
                     )
                 )
         # Construct processed model, replacing the raw keywords with the processed keywords
         llm_structured_response_dict = llm_structured_response.dict()
-        llm_structured_response_dict.pop("keywords")
+        # Remove keywords if present, to avoid mismatch
+        llm_structured_response_dict.pop("keywords", None)
         output_model.result = ProcessedResultModel(
             **llm_structured_response_dict,
             keywords=processed_keywords,
