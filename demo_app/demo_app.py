@@ -1358,8 +1358,29 @@ if IS_COSMOSDB_AVAILABLE:
         )
 
 
-### Call Center Audio Processing Example ###
+### Audio Processing ###
 with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
+ 
+    def format_audio_analysis_markdown(response_json):
+        # Accepts the JSON response, returns Markdown string
+        if not isinstance(response_json, dict) or not response_json.get("success"):
+            return f"**Error:** {response_json.get('error_text', 'Unknown error')}"
+        result = response_json["result"]
+        md = f"""## Audio Analysis
+ 
+**Summary:** {result.get('audio_summary', '')}
+ 
+**Cooperation:** {result.get('participant_cooperation', '')}  
+**Sentiment:** {result.get('participant_sentiment', '')}
+ 
+**Next Action:** {result.get('next_action', 'None')}
+ 
+**Keywords:**  
+"""
+        for kw in result.get('keywords', []):
+            md += f"- `{kw['timestamp']}`: **{kw['keyword']}**\n"
+        return md
+ 
     # Define requesting function, which reshapes the input into the correct schema
     def cc_audio_upload(file_upload, file_record, transcription_method):
         file = file_upload or file_record
@@ -1367,25 +1388,29 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
             gr.Warning(
                 "Please select or upload an audio file, then click 'Process File'."
             )
-            return ("", "", {})
+            return ("", "", {}, "")
         # Get response from the API
         with open(file, "rb") as f:
-            mime_type, _= mimetypes.guess_type(file)
+            mime_type, _ = mimetypes.guess_type(file)
             mime_type = mime_type or "application/octet-stream"
-
+ 
             payload = {"method": transcription_method}
             files = {
                 "audio": (os.path.basename(file), f, mime_type),
                 "json": ("payload.json", json.dumps(payload), "application/json"),
             }
-
-            request_outputs = send_request(
+ 
+            status_code, time_taken, response_json = send_request(
                 route="call_center_audio_analysis",
                 files=files,
                 force_json_content_type=True,  # JSON gradio block requires this
             )
-        return request_outputs
-
+        # Format markdown
+        md = format_audio_analysis_markdown(
+            json.loads(response_json) if isinstance(response_json, str) else response_json
+        )
+        return status_code, time_taken, response_json, md
+ 
     # Input components
     cc_audio_proc_instructions = gr.Markdown(
         (
@@ -1394,7 +1419,7 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
             "\n\nThe pipeline is as follows:\n"
             "1. Azure AI Speech or Azure OpenAI Whisper is used to transcribe a recording.\n"
             "2. The result is formatted into a more readable format (with timestamps, speaker IDs and the text).\n"
-            "3. GPT-4o is instructed to:\n* Classify the customer's sentiment & satisfaction\n"
+            "3. GPT-4o is instructed to:\n* summarise and pull out key components\n"
             "* Determine the next action that needs to be completed and the timestamp that the action was mentioned.\n"
             "* Extract a list of keywords from the conversation. Each of these keywords is cross-referenced with the "
             "raw transcription to retrieve the entire sentence that contains the keyword.\n"
@@ -1404,37 +1429,24 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
         show_label=False,
     )
     with gr.Row():
-            audio_upload = gr.File(
-                label="Upload Audio/Video File",
-                file_types=["audio/*", "video/*"]
-             )
-            audio_record = gr.Audio(
-                label="Record Audio",
-                sources=["microphone"],
-                type="filepath"
-            )
-
-
-        # Examples
-   # cc_audio_proc_examples = gr.Examples(
-   #     label="Audio Upload Examples",
-    #     examples=[
-    #        ["sample1.wav", None],
-    #        [None, "sample2.wav"]
-    #    ],
-    #    inputs=[
-    #        audio_upload,
-    #        audio_record,
-    #    ],
-    #    )
-    cc_audio_proc_transcription_method = gr.Dropdown(
-            label="Select Transcription Method",
-            value="fast",
-            choices={
-                ("Fast Transcription API", "fast"),
-                ("Azure OpenAI Whisper", "aoai_whisper"),
-            },
+        audio_upload = gr.File(
+            label="Upload Audio/Video File",
+            file_types=["audio/*", "video/*"]
         )
+        audio_record = gr.Audio(
+            label="Record Audio",
+            sources=["microphone"],
+            type="filepath"
+        )
+ 
+    cc_audio_proc_transcription_method = gr.Dropdown(
+        label="Select Transcription Method",
+        value="fast",
+        choices={
+            ("Fast Transcription API", "fast"),
+            ("Azure OpenAI Whisper", "aoai_whisper"),
+        },
+    )
     cc_audio_proc_start_btn = gr.Button("Process File", variant="primary")
     # Output components
     with gr.Column() as cc_audio_proc_output_row:
@@ -1444,6 +1456,7 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                 label="Response Status Code", interactive=False
             )
             cc_audio_proc_time_taken = gr.Textbox(label="Time Taken", interactive=False)
+        cc_audio_proc_output_md = gr.Markdown(label="Analysis (Markdown)")
         cc_audio_proc_output_json = gr.JSON(label="API Response")
     # Actions
     cc_audio_proc_start_btn.click(
@@ -1452,9 +1465,11 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
         outputs=[
             cc_audio_proc_status_code,
             cc_audio_proc_time_taken,
+            cc_audio_proc_output_md,
             cc_audio_proc_output_json,
         ],
     )
+
 
 
 ### Text summarization Example ###
