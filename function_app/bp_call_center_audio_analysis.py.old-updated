@@ -1,0 +1,262 @@
+import json
+import logging
+import os
+from enum import Enum
+from typing import Optional
+
+import azure.functions as func
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from dotenv import load_dotenv
+from openai import AsyncAzureOpenAI, AzureOpenAI
+from pydantic import BaseModel, Field
+from src.components.speech import (
+    AOAI_WHISPER_MIME_TYPE_MAPPER,
+    BATCH_TRANSCRIPTION_MIME_TYPE_MAPPER,
+    AzureSpeechTranscriber,
+    is_phrase_start_time_match,
+)
+from src.components.utils import base64_bytes_to_buffer, get_file_ext_and_mime_type
+from src.helpers.common import MeasureRunTime
+from src.result_enrichment.common import is_value_in_content
+from src.schema import LLMResponseBaseModel
+
+load_dotenv()
+
+bp_call_center_audio_analysis = func.Blueprint()
+FUNCTION_ROUTE = "call_center_audio_analysis"
+
+token_provider = get_bearer_token_provider(
+    DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+)
+
+SPEECH_ENDPOINT = os.getenv("SPEECH_ENDPOINT")
+AOAI_LLM_DEPLOYMENT = os.getenv("AOAI_LLM_DEPLOYMENT")
+AOAI_WHISPER_DEPLOYMENT = os.getenv("AOAI_WHISPER_DEPLOYMENT")
+AOAI_ENDPOINT = os.getenv("AOAI_ENDPOINT")
+
+### Setup components
+aoai_whisper_async_client = AsyncAzureOpenAI(
+    azure_endpoint=AOAI_ENDPOINT,
+    azure_deployment=AOAI_WHISPER_DEPLOYMENT,
+    azure_ad_token_provider=token_provider,
+    api_version="2024-06-01",
+)
+transcriber = AzureSpeechTranscriber(
+    speech_endpoint=SPEECH_ENDPOINT,
+    azure_ad_token_provider=token_provider,
+    aoai_whisper_async_client=aoai_whisper_async_client,
+)
+# Define the configuration for the transcription job
+fast_transcription_definition = {
+    "locales": ["en-US"],
+    "profanityFilterMode": "None",  # Profanity filtering is unnecessary for police interviews
+    "diarizationEnabled": True,  # Enable speaker diarization for witness and officer differentiation
+    "wordLevelTimestampsEnabled": True,
+}
+aoai_whisper_kwargs = {
+    "language": "en",
+    "prompt": None,
+    "temperature": None,
+    "timeout": 60,
+}
+
+aoai_client = AzureOpenAI(
+    azure_endpoint=AOAI_ENDPOINT,
+    azure_deployment=AOAI_LLM_DEPLOYMENT,
+    azure_ad_token_provider=token_provider,
+    api_version="2024-06-01",
+    timeout=30,
+    max_retries=0,
+)
+
+# Create mappers to handle different types of transcription methods
+TRANSCRIPTION_METHOD_TO_MIME_MAPPER = {
+    "fast": BATCH_TRANSCRIPTION_MIME_TYPE_MAPPER,
+    "aoai_whisper": AOAI_WHISPER_MIME_TYPE_MAPPER,
+}
+
+
+### Setup Pydantic models for validation of LLM calls, and the Function response itself
+# Classification fields
+class WitnessCooperationEnum(Enum):
+    Cooperative = "Cooperative"
+    Reluctant = "Reluctant"
+    Uncooperative = "Uncooperative"
+
+
+WITNESS_COOPERATION_VALUES = [e.value for e in WitnessCooperationEnum]
+
+
+class WitnessEmotionEnum(Enum):
+    Calm = "Calm"
+    Nervous = "Nervous"
+    Distressed = "Distressed"
+    Angry = "Angry"
+
+
+WITNESS_EMOTION_VALUES = [e.value for e in WitnessEmotionEnum]
+
+
+# Setup a class for the raw keywords returned by the LLM, and then the enriched version (after we match the keywords to the transcription)
+class RawKeyword(LLMResponseBaseModel):
+    keyword: str = Field(
+        description="A keyword extracted from the interview. This should be a direct match to a word or phrase in the transcription without modification of the spelling or grammar.",
+        examples=["robbery", "suspect fled on foot"],
+    )
+    timestamp: str = Field(
+        description="The timestamp of the sentence from which the keyword was uttered.",
+        examples=["0:18"],
+    )
+
+
+class ProcessedKeyWord(RawKeyword):
+    keyword_matched_to_transcription_sentence: bool = Field(
+        description="Whether the keyword was matched to a single sentence in the transcription.",
+    )
+    full_sentence_text: Optional[str] = Field(
+        default=None,
+        description="The full text of the sentence in which the keyword was uttered.",
+    )
+    sentence_confidence: Optional[float] = Field(
+        default=None,
+        description="The confidence score of the sentence from which the keyword was extracted.",
+    )
+    sentence_start_time_secs: Optional[float] = Field(
+        default=None,
+        description="The start time of the sentence in the audio recording.",
+    )
+    sentence_end_time_secs: Optional[float] = Field(
+        default=None,
+        description="The end time of the sentence in the audio recording.",
+    )
+
+
+# Define the full schema for the LLM's response. We inherit from LLMResponseBaseModel to get the prompt generation functionality.
+class LLMRawResponseModel(LLMResponseBaseModel):
+    """
+    Defines the required JSON schema for the LLM to adhere to. This can be used
+    to validate that the LLM's raw text response can be parsed into the format
+    that is expected by downstream processes (e.g. when we need to save the data
+    into a database).
+
+    This class inherits from LLMResponseBaseModel and sets a description and
+    example for each field, allowing us to run `model.get_prompt_json_example()`
+    to generate a prompt-friendly string representation of the expected JSON
+    that we can provide to the LLM.
+    """
+
+    interview_summary: str = Field(
+        description="A summary of the interview, including key details about the crime, suspects, and witness observations.",
+        examples=[
+            "The witness described a robbery where the suspect fled on foot wearing a black hoodie."
+        ],
+    )
+    witness_cooperation: WitnessCooperationEnum = Field(
+        description=f"The level of cooperation shown by the witness during the interview. It must only be one of these options: {WITNESS_COOPERATION_VALUES}.",
+        examples=[WITNESS_COOPERATION_VALUES[0]],
+    )
+    witness_emotion: WitnessEmotionEnum = Field(
+        description=f"The emotional state of the witness during the interview. It must only be one of these options: {WITNESS_EMOTION_VALUES}.",
+        examples=[WITNESS_EMOTION_VALUES[1]],
+    )
+    next_steps: Optional[str] = Field(
+        description="The next steps in the case as discussed during the interview, if any.",
+        examples=["Officers will review CCTV footage near the crime scene."],
+    )
+    next_steps_sentence_timestamp: Optional[str] = Field(
+        description="The timestamp of the sentence where the next steps were mentioned.",
+        examples=["12:45"],
+    )
+    keywords: list[RawKeyword] = Field(
+        description=(
+            "A list of keywords or phrases related to the crime, suspects, or any key observations made by the witness. "
+            "Each result should include the exact keyword and a timestamp of the sentence where it was uttered."
+        ),
+        examples=[
+            [
+                {"keyword": "robbery", "timestamp": "0:18"},
+                {"keyword": "suspect fled on foot", "timestamp": "0:46"},
+                {"keyword": "black hoodie", "timestamp": "1:37"},
+            ]
+        ],
+    )
+
+
+class ProcessedResultModel(LLMRawResponseModel):
+    """
+    Defined the schema for the processed result that will be returned by the
+    function. This class inherits from LLMRawResponseModel but overwrites the
+    `keywords` field to use the ProcessedKeyWord model instead of the
+    RawKeyword. This way we can return the processed keywords with additional
+    metadata.
+    """
+
+    keywords: list[ProcessedKeyWord] = Field(
+        description=(
+            "A list of key phrases related to the crime, suspects, or any observations made during the interview. "
+            "Each item includes the keyword and timestamp of the sentence as extracted by the LLM, along with additional metadata "
+            "that is merged from the transcription result."
+        ),
+    )
+
+
+class FunctionReponseModel(BaseModel):
+    """
+    Defines the schema that will be returned by the function. We'll use this to
+    ensure that the response contains the correct values and structure, and
+    to allow a partially filled response to be returned in case of an error.
+    """
+
+    success: bool = Field(
+        default=False, description="Indicates whether the pipeline was successful."
+    )
+    result: Optional[ProcessedResultModel] = Field(
+        default=None, description="The final result of the pipeline."
+    )
+    error_text: Optional[str] = Field(
+        default=None,
+        description="If an error occurred, this field will contain the error message.",
+    )
+    speech_extracted_text: Optional[str] = Field(
+        default=None,
+        description="The raw & formatted text content extracted by Azure AI Speech.",
+    )
+    speech_raw_response: Optional[list | dict] = Field(
+        default=None, description="The raw API response from Azure AI Speech."
+    )
+    speech_time_taken_secs: Optional[float] = Field(
+        default=None,
+        description="The time taken to transcribe the text using Azure AI Speech.",
+    )
+    llm_input_messages: Optional[list[dict]] = Field(
+        default=None, description="The messages that were sent to the LLM."
+    )
+    llm_reply_message: Optional[dict] = Field(
+        default=None, description="The message that was received from the LLM."
+    )
+    llm_raw_response: Optional[str] = Field(
+        default=None, description="The raw text response from the LLM."
+    )
+    llm_time_taken_secs: Optional[float] = Field(
+        default=None, description="The time taken to receive a response from the LLM."
+    )
+    func_time_taken_secs: Optional[float] = Field(
+        default=None, description="The total time taken to process the request."
+    )
+
+
+# Create the system prompt for the LLM, dynamically including the JSON schema
+LLM_SYSTEM_PROMPT = (
+    "You are an assistant specializing in summarising and analyzing police witness interviews.\n"
+    "Your task is to review a witness interview and extract all key information, including crime details, suspects, and observations.\n"
+    f"{LLMRawResponseModel.get_prompt_json_example(include_preceding_json_instructions=True)}"
+)
+
+
+@bp_call_center_audio_analysis.route(route=FUNCTION_ROUTE)
+async def call_center_audio_analysis(
+    req: func.HttpRequest,
+) -> func.HttpResponse:
+    logging.info(f"Python HTTP trigger function `{FUNCTION_ROUTE}` received a request.")
+    # The logic remains similar to the original function, adapted for police interviews.
+    ...
