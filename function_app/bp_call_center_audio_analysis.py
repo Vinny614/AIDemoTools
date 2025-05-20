@@ -229,6 +229,7 @@ async def call_center_audio_analysis(
     req: func.HttpRequest,
 ) -> func.HttpResponse:
     logging.info(f"Python HTTP trigger function `{FUNCTION_ROUTE}` received a request.")
+    logging.info(f"Request files: {list(req.files.keys())}")
     output_model = FunctionReponseModel(success=False)
     try:
         error_text = "An error occurred during processing."
@@ -257,7 +258,21 @@ async def call_center_audio_analysis(
             transcription_method
         ]
         error_text = "Invalid audio file. Please submit a file with a valid filename and content type."
+        if "audio" not in req.files or not req.files["audio"].filename:
+            output_model.error_text = "No audio file uploaded."
+            return func.HttpResponse(
+                body=output_model.model_dump_json(),
+                mimetype="application/json",
+                status_code=422,
+            )
         audio_file = req.files["audio"]
+        if not audio_file.content_type or not audio_file.content_type.startswith("audio"):
+            output_model.error_text = f"Invalid file type: {audio_file.content_type}. Only audio files are supported."
+            return func.HttpResponse(
+                body=output_model.model_dump_json(),
+                mimetype="application/json",
+                status_code=422,
+            )
         audio_file_b64 = audio_file.read()
         audio_file_ext, _audio_file_content_type = get_file_ext_and_mime_type(
             valid_mimes_to_file_ext_mapper=valid_mime_to_filetype_mapper,

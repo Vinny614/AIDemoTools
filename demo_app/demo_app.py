@@ -1360,61 +1360,65 @@ if IS_COSMOSDB_AVAILABLE:
 
 ### Audio Processing ###
 with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
- 
-    def format_audio_analysis_markdown(response_json):
-        # Accepts the JSON response, returns Markdown string
-        if not isinstance(response_json, dict) or not response_json.get("success"):
-            return f"**Error:** {response_json.get('error_text', 'Unknown error')}"
-        result = response_json["result"]
-        md = f"""## Audio Analysis
- 
-**Summary:** {result.get('audio_summary', '')}
- 
-**Cooperation:** {result.get('participant_cooperation', '')}  
-**Sentiment:** {result.get('participant_sentiment', '')}
- 
-**Next Action:** {result.get('next_action', 'None')}
- 
-**Keywords:**  
-"""
-        for kw in result.get('keywords', []):
-            md += f"- `{kw['timestamp']}`: **{kw['keyword']}**\n"
-        return md
- 
-    # Define requesting function, which reshapes the input into the correct schema
+
+    def format_audio_analysis_markdown(response_obj):
+        """
+        Formats the audio analysis response object into markdown for display.
+        """
+        if not isinstance(response_obj, dict):
+            return "Invalid response format."
+        md_lines = []
+        if "summary" in response_obj:
+            md_lines.append(f"### Summary\n{response_obj['summary']}\n")
+        if "actions" in response_obj:
+            md_lines.append("### Actions")
+            for action in response_obj["actions"]:
+                md_lines.append(f"- {action}")
+        if "keywords" in response_obj:
+            md_lines.append("### Keywords")
+            for keyword in response_obj["keywords"]:
+                md_lines.append(f"- {keyword}")
+        if "transcription" in response_obj:
+            md_lines.append("### Transcription")
+            md_lines.append(response_obj["transcription"])
+        return "\n".join(md_lines) if md_lines else "No analysis available."
+
     def cc_audio_upload(file_upload, file_record, transcription_method):
         file = file_upload or file_record
         if file is None:
             gr.Warning(
                 "Please select or upload an audio file, then click 'Process File'."
             )
-            return ("", "", {}, "")
+            return ("", "", "", {})
+        # Validate file type
+        mime_type, _ = mimetypes.guess_type(file)
+        if not mime_type or not mime_type.startswith("audio"):
+            gr.Warning("Only audio files are supported. Please upload a valid audio file.")
+            return ("", "", "", {})
         # Get response from the API
         with open(file, "rb") as f:
-            mime_type, _ = mimetypes.guess_type(file)
-            mime_type = mime_type or "application/octet-stream"
- 
             payload = {"method": transcription_method}
             files = {
                 "audio": (os.path.basename(file), f, mime_type),
                 "json": ("payload.json", json.dumps(payload), "application/json"),
             }
- 
             status_code, time_taken, response_json = send_request(
                 route="call_center_audio_analysis",
                 files=files,
-                force_json_content_type=True,  # JSON gradio block requires this
+                force_json_content_type=True,
             )
-        # Format markdown
-        md = format_audio_analysis_markdown(
-            json.loads(response_json) if isinstance(response_json, str) else response_json
-        )
-        return status_code, time_taken, response_json, md
- 
+        # Format markdown output
+        try:
+            response_obj = json.loads(response_json) if isinstance(response_json, str) else response_json
+        except Exception:
+            response_obj = response_json
+        md = format_audio_analysis_markdown(response_obj)
+        return status_code, time_taken, md, response_obj
+
     # Input components
     cc_audio_proc_instructions = gr.Markdown(
         (
-            "This example transcribes audio records and extract key information "
+            "This example transcribes audio records and extracts key information "
             "([Code Link](https://github.com/azure/multimodal-ai-llm-processing-accelerator/blob/main/function_app/bp_call_center_audio_analysis.py))."
             "\n\nThe pipeline is as follows:\n"
             "1. Azure AI Speech or Azure OpenAI Whisper is used to transcribe a recording.\n"
@@ -1430,22 +1434,21 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
     )
     with gr.Row():
         audio_upload = gr.File(
-            label="Upload Audio/Video File",
-            file_types=["audio/*", "video/*"]
+            label="Upload Audio File",
+            file_types=["audio/*"],  # Only allow audio files
         )
         audio_record = gr.Audio(
             label="Record Audio",
             sources=["microphone"],
             type="filepath"
         )
- 
     cc_audio_proc_transcription_method = gr.Dropdown(
         label="Select Transcription Method",
         value="fast",
-        choices={
+        choices=[
             ("Fast Transcription API", "fast"),
             ("Azure OpenAI Whisper", "aoai_whisper"),
-        },
+        ],
     )
     cc_audio_proc_start_btn = gr.Button("Process File", variant="primary")
     # Output components
