@@ -2137,7 +2137,11 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
     )
 
 ## Version Control ###
+##  v0.7 - Audio Fixes, and updated with markdown for Doc Intelligence
 ##  v0.6 - Updated with markdown for Audio
+##  v0.5 - Updated with markdown for Document Intelligenc
+##  v0.4 - Updated with markdown for Form Extraction
+##  v0.3 - Updated with markdown for PII Redaction
 
 with gr.Blocks(
     title="Multimodal AI & LLM Processing Accelerator",
