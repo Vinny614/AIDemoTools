@@ -145,16 +145,36 @@ class KeyInformationItem(BaseModel):
         examples=["Describes the incident", "Where the event occurred"],
     )
 
+class ParticipantItem(BaseModel):
+    name: Optional[str] = Field(
+        default=None, description="Name or identifier of the participant, if available."
+    )
+    role: Optional[str] = Field(
+        default=None, description="Role of the participant (e.g., witness, officer)."
+    )
+    summary: Optional[str] = Field(
+        default=None, description="Brief summary of the participant's involvement."
+    )
+    cooperation: Optional[str] = Field(
+        default=None, description="Cooperation level: Cooperative, Uncooperative, Unknown."
+    )
+    sentiment: Optional[str] = Field(
+        default=None, description="Sentiment: Calm, Neutral, Distressed, Unknown."
+    )
+
 class LLMRawResponseModel(LLMResponseBaseModel):
     """
     JSON schema for the LLM to follow for analysis of investigative or legal audio recordings.
     """
-
     audio_summary: str = Field(
         description="A summary of the audio footage, including main events, participants, and key details. No more than 20 words.",
         examples=[
             "Two people discuss the incident; a car alarm is heard in the background.",
         ],
+    )
+    participants: Optional[list[ParticipantItem]] = Field(
+        default=None,
+        description="List of participants with their name, role, summary, cooperation, and sentiment."
     )
     participant_cooperation: ParticipantCooperationEnum = Field(
         description=f"Were participants cooperative? Options: {PARTICIPANT_COOPERATION_VALUES}.",
@@ -235,10 +255,15 @@ class FunctionReponseModel(BaseModel):
 LLM_SYSTEM_PROMPT = (
     "You are an assistant specialising in summarising and analyzing investigative, legal, or incident-related audio footage.\n"
     "Your task is to review any kind of audio recording (statements, interviews, on-scene or ambient audio, etc) and extract all key information, including main events, participants, sounds, and more.\n"
+    "For each participant, provide their name (if available), role (e.g., witness, officer), a brief summary of their involvement, their cooperation level (Cooperative, Uncooperative, Unknown), and their sentiment (Calm, Neutral, Distressed, Unknown).\n"
     "For each key item, provide its type (e.g., person, location, event, object, sound), its value, and a short description or role if relevant.\n"
     "Respond ONLY in the following JSON format. Do not include any commentary or explanation.\n"
     "{\n"
     '  "audio_summary": "A summary of the audio footage, including main events, participants, and key details.",\n'
+    '  "participants": [\n'
+    '    {"name": "John Smith", "role": "witness", "summary": "Describes the incident and answers questions.", "cooperation": "Cooperative", "sentiment": "Calm"},\n'
+    '    {"name": "Officer Lee", "role": "officer", "summary": "Asks questions and clarifies details.", "cooperation": "Cooperative", "sentiment": "Neutral"}\n'
+    "  ],\n"
     '  "participant_cooperation": "Cooperative",\n'
     '  "participant_sentiment": "Calm",\n'
     '  "next_action": "Recommended next step after reviewing this audio. If none, return null.",\n'
