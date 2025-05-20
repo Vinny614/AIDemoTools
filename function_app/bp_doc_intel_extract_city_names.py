@@ -95,7 +95,6 @@ class LLMInvestigationExtractionModel(LLMResponseBaseModel):
     structured_people: Optional[list[StructuredPerson]] = None
     structured_events: Optional[list[StructuredEvent]] = None
 
-
 class FunctionResponseModel(BaseModel):  # Typo fixed here
     """
     Response model for the doc_intel_extract_city_names function.
