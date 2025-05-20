@@ -207,14 +207,14 @@ class FunctionReponseModel(BaseModel):
     )
 
 LLM_SYSTEM_PROMPT = (
-    "You are an assistant specializing in summarizing and analyzing investigative, legal, or incident-related audio footage.\n"
+    "You are an assistant specialising in summarising and analyzing investigative, legal, or incident-related audio footage.\n"
     "Your task is to review any kind of audio recording (statements, interviews, on-scene or ambient audio, etc) and extract all key information, including main events, participants, sounds, and more.\n"
     "Respond ONLY in the following JSON format. Do not include any commentary or explanation.\n"
     "{\n"
-    '  "audio_summary": "A summary of the audio footage, including main events, participants, and key details. No more than 20 words.",\n'
+    '  "audio_summary": "A summary of the audio footage, including main events, participants, and key details.",\n'
     '  "participant_cooperation": "Cooperative",\n'
     '  "participant_sentiment": "Calm",\n'
-    '  "next_action": "Recommended next step after reviewing this audio. No more than 20 words. If none, return null.",\n'
+    '  "next_action": "Recommended next step after reviewing this audio. If none, return null.",\n'
     '  "next_action_sentence_timestamp": "6:12",\n'
     '  "keywords": [\n'
     '    {"keyword": "car alarm", "timestamp": "0:18"},\n'

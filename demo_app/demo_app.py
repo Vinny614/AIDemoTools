@@ -1364,23 +1364,82 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
     def format_audio_analysis_markdown(response_obj):
         """
         Formats the audio analysis response object into markdown for display.
+        Clearly marks transcription, summary, and key information.
         """
         if not isinstance(response_obj, dict):
-            return "Invalid response format."
+            return "No analysis available."
+
         md_lines = []
-        if "summary" in response_obj:
-            md_lines.append(f"### Summary\n{response_obj['summary']}\n")
-        if "actions" in response_obj:
-            md_lines.append("### Actions")
-            for action in response_obj["actions"]:
-                md_lines.append(f"- {action}")
-        if "keywords" in response_obj:
-            md_lines.append("### Keywords")
-            for keyword in response_obj["keywords"]:
-                md_lines.append(f"- {keyword}")
-        if "transcription" in response_obj:
-            md_lines.append("### Transcription")
-            md_lines.append(response_obj["transcription"])
+
+        # Summary
+        summary = (
+            response_obj.get("result", {}).get("summary")
+            or response_obj.get("result", {}).get("audio_summary")
+            or response_obj.get("summary")
+            or response_obj.get("audio_summary")
+        )
+        if summary:
+            md_lines.append("## 📝 Summary")
+            md_lines.append(f"{summary}\n")
+
+        # Key Information: Actions/Next Steps
+        actions = (
+            response_obj.get("result", {}).get("actions")
+            or response_obj.get("actions")
+            or []
+        )
+        next_action = (
+            response_obj.get("result", {}).get("next_action")
+            or response_obj.get("next_action")
+        )
+        next_action_ts = (
+            response_obj.get("result", {}).get("next_action_sentence_timestamp")
+            or response_obj.get("next_action_sentence_timestamp")
+        )
+        if actions or next_action:
+            md_lines.append("## 🔑 Key Information: Actions / Next Steps")
+            if actions:
+                for action in actions:
+                    if isinstance(action, dict):
+                        desc = action.get("description") or action.get("action") or str(action)
+                        ts = action.get("timestamp") or ""
+                        md_lines.append(f"- **{desc}**{' at ' + ts if ts else ''}")
+                    else:
+                        md_lines.append(f"- {action}")
+            if next_action:
+                md_lines.append(f"- **Next Action:** {next_action}{' at ' + next_action_ts if next_action_ts else ''}")
+            md_lines.append("")
+
+        # Key Information: Keywords
+        keywords = (
+            response_obj.get("result", {}).get("keywords")
+            or response_obj.get("keywords")
+            or []
+        )
+        if keywords:
+            md_lines.append("## 🏷️ Key Information: Keywords")
+            for kw in keywords:
+                if isinstance(kw, dict):
+                    word = kw.get("keyword") or str(kw)
+                    sent = kw.get("full_sentence_text") or ""
+                    ts = kw.get("timestamp") or ""
+                    md_lines.append(f"- **{word}**{' at ' + ts if ts else ''}: {sent}")
+                else:
+                    md_lines.append(f"- {kw}")
+            md_lines.append("")
+
+        # Transcription
+        transcription = (
+            response_obj.get("result", {}).get("transcription")
+            or response_obj.get("speech_extracted_text")
+            or response_obj.get("transcription")
+        )
+        if transcription:
+            md_lines.append("## 🎤 Transcription")
+            md_lines.append("```text")
+            md_lines.append(transcription)
+            md_lines.append("```")
+
         return "\n".join(md_lines) if md_lines else "No analysis available."
 
     def cc_audio_upload(file_upload, file_record, transcription_method):
@@ -1475,7 +1534,7 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
 
 
 
-### Text summarization Example ###
+### Text summarisation Example ###
 
 with gr.Blocks(analytics_enabled=False) as sum_text_block:
     # Define requesting function, which reshapes the input into the correct schema
@@ -1836,6 +1895,9 @@ with gr.Blocks(analytics_enabled=False) as di_llm_ext_names_block:
                         md_lines.append(f"    - Suspects: {', '.join(event['suspects'])}")
                     if event.get("officers"):
                         md_lines.append(f"    - Officers: {', '.join(event['officers'])}")
+
+                   
+
                     if event.get("vehicles"):
                         for v in event["vehicles"]:
                             md_lines.append(f"    - Vehicle: {v.get('description', '')} ({v.get('reg_number', '')})")
