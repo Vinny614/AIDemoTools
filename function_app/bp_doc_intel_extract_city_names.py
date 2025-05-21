@@ -59,7 +59,6 @@ doc_intel_result_processor = DocumentIntelligenceProcessor(
     ),
 )
 
-
 class StructuredPerson(BaseModel):
     name: str
     role: Optional[str] = None
@@ -67,7 +66,6 @@ class StructuredPerson(BaseModel):
     vehicles: Optional[list[dict]] = None
     locations: Optional[list[str]] = None
     contact_info: Optional[list[str]] = None
-
 
 class StructuredEvent(BaseModel):
     type: str
@@ -77,7 +75,6 @@ class StructuredEvent(BaseModel):
     officers: Optional[list[str]] = None
     vehicles: Optional[list[dict]] = None
     witness_description: Optional[str] = None
-
 
 class LLMInvestigationExtractionModel(LLMResponseBaseModel):
     people: list[str]
@@ -111,7 +108,6 @@ class FunctionResponseModel(BaseModel):  # Typo fixed here
     llm_reply_message: Optional[dict] = None
     llm_raw_response: Optional[str] = None
     llm_time_taken_secs: Optional[float] = None
-
 
 def normalize_llm_response(raw_json: dict) -> dict:
     """
@@ -195,7 +191,6 @@ def normalize_llm_response(raw_json: dict) -> dict:
 
     return raw_json
 
-
 LLM_INVESTIGATION_PROMPT = (
     "You are a digital case analyst reviewing a police report.\n\n"
     "Return a structured JSON object that follows this schema and captures key information and relationships.\n\n"
@@ -223,7 +218,6 @@ LLM_INVESTIGATION_PROMPT = (
     "- Output must be valid JSON matching this structure.\n"
     "- Ensure contact_info is a list of plain strings, (never a dictionary or object).\n"
 )
-
 
 @bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
 def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
