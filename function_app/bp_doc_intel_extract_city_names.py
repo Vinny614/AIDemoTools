@@ -46,7 +46,7 @@ aoai_client = AzureOpenAI(
     azure_deployment=AOAI_LLM_DEPLOYMENT,
     azure_ad_token_provider=aoai_token_provider,
     api_version="2024-06-01",
-    timeout=60,
+    timeout=90,
     max_retries=2,
 )
 
