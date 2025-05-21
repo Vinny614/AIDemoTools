@@ -23,17 +23,16 @@ from helpers import (
     resize_img_by_max,
 )
 from PIL import Image
+from moviepy import VideoFileClip  # <-- Added for video to mp3 conversion
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s:%(levelname)s:%(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-
-# Reduce Azure SDK logging level
-_logger = logging.getLogger("azure.core")
-_logger.setLevel(logging.WARNING)
-
 load_dotenv()
 
 # Get function endpoint from env vars. If not set, default to local host.
@@ -1357,7 +1356,6 @@ if IS_COSMOSDB_AVAILABLE:
             ],
         )
 
-
 ### Audio Processing ###
 with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
 
@@ -1371,7 +1369,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
 
         md_lines = []
 
-        # Summary
         summary = (
             response_obj.get("result", {}).get("summary")
             or response_obj.get("result", {}).get("audio_summary")
@@ -1382,7 +1379,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
             md_lines.append("## 📝 Summary")
             md_lines.append(f"{summary}\n")
 
-        # Key Information: Actions/Next Steps
         actions = (
             response_obj.get("result", {}).get("actions")
             or response_obj.get("actions")
@@ -1410,7 +1406,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                 md_lines.append(f"- **Next Action:** {next_action}{' at ' + next_action_ts if next_action_ts else ''}")
             md_lines.append("")
 
-        # Key Information: Key Information Items (richer than keywords)
         key_information = (
             response_obj.get("result", {}).get("key_information")
             or response_obj.get("key_information")
@@ -1437,7 +1432,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                     md_lines.append(f"- {item}")
             md_lines.append("")
 
-        # Fallback: Keywords (for backward compatibility)
         keywords = (
             response_obj.get("result", {}).get("keywords")
             or response_obj.get("keywords")
@@ -1455,7 +1449,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                     md_lines.append(f"- {kw}")
             md_lines.append("")
 
-        # Transcription
         transcription = (
             response_obj.get("result", {}).get("transcription")
             or response_obj.get("speech_extracted_text")
@@ -1469,19 +1462,29 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
 
         return "\n".join(md_lines) if md_lines else "No analysis available."
 
-    def cc_audio_upload(file_upload, file_record, transcription_method):
-        file = file_upload or file_record
+    def video_to_mp3(video_path):
+        audio_path = video_path.rsplit('.', 1)[0] + ".mp3"
+        with VideoFileClip(video_path) as video:
+            video.audio.write_audiofile(audio_path, logger=None)
+        return audio_path
+
+    def cc_video_audio_upload(video_file, audio_file, transcription_method):
+        # Prefer audio if provided, otherwise video
+        file = audio_file or video_file
         if file is None:
-            gr.Warning(
-                "Please select or upload an audio file, then click 'Process File'."
-            )
+            gr.Warning("Please upload an audio or video file.")
             return ("", "", "", {})
-        # Validate file type
+        # If video file, convert to mp3
         mime_type, _ = mimetypes.guess_type(file)
-        if not mime_type or not mime_type.startswith("audio"):
-            gr.Warning("Only audio files are supported. Please upload a valid audio file.")
+        if mime_type and mime_type.startswith("video"):
+            file = video_to_mp3(file)
+            mime_type = "audio/mp3"
+        elif mime_type and mime_type.startswith("audio"):
+            pass
+        else:
+            gr.Warning("Unsupported file type. Please upload a valid audio or video file.")
             return ("", "", "", {})
-        # Get response from the API
+        # Now process the audio as before
         with open(file, "rb") as f:
             payload = {"method": transcription_method}
             files = {
@@ -1493,7 +1496,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
                 files=files,
                 force_json_content_type=True,
             )
-        # Format markdown output
         try:
             response_obj = json.loads(response_json) if isinstance(response_json, str) else response_json
         except Exception:
@@ -1501,32 +1503,20 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
         md = format_audio_analysis_markdown(response_obj)
         return status_code, time_taken, md, response_obj
 
-    # Input components
     cc_audio_proc_instructions = gr.Markdown(
         (
-            "This example transcribes audio records and extracts key information "
-            "([Code Link](https://github.com/azure/multimodal-ai-llm-processing-accelerator/blob/main/function_app/bp_call_center_audio_analysis.py))."
-            "\n\nThe pipeline is as follows:\n"
-            "1. Azure AI Speech or Azure OpenAI Whisper is used to transcribe a recording.\n"
-            "2. The result is formatted into a more readable format (with timestamps, speaker IDs and the text).\n"
-            "3. GPT-4o is instructed to:\n* summarise and pull out key components\n"
-            "* Determine the next action that needs to be completed and the timestamp that the action was mentioned.\n"
-            "* Extract a list of keywords from the conversation. Each of these keywords is cross-referenced with the "
-            "raw transcription to retrieve the entire sentence that contains the keyword.\n"
-            "4. The result is returned in a structured JSON format.\n\n"
-            "The response includes the final result, as well as many of the intermediate outputs from the processing pipeline."
+            "Upload an audio or video file. Video files will be automatically converted to audio and analyzed for call center insights."
         ),
         show_label=False,
     )
     with gr.Row():
-        audio_upload = gr.File(
-            label="Upload Audio File",
-            file_types=["audio/*"],  # Only allow audio files
+        video_upload = gr.Video(
+            label="Upload Video File (mp4, mov, avi, etc)",
+            sources=["upload"],
         )
-        audio_record = gr.Audio(
-            label="Record Audio",
-            sources=["microphone"],
-            type="filepath"
+        audio_upload = gr.File(
+            label="Upload Audio File (wav, mp3, etc)",
+            file_types=["audio/*"],
         )
     cc_audio_proc_transcription_method = gr.Dropdown(
         label="Select Transcription Method",
@@ -1537,7 +1527,6 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
         ],
     )
     cc_audio_proc_start_btn = gr.Button("Process File", variant="primary")
-    # Output components
     with gr.Column() as cc_audio_proc_output_row:
         cc_audio_proc_output_label = gr.Label(value="API Response", show_label=False)
         with gr.Row():
@@ -1547,10 +1536,9 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
             cc_audio_proc_time_taken = gr.Textbox(label="Time Taken", interactive=False)
         cc_audio_proc_output_md = gr.Markdown(label="Analysis (Markdown)")
         cc_audio_proc_output_json = gr.JSON(label="API Response")
-    # Actions
     cc_audio_proc_start_btn.click(
-        fn=cc_audio_upload,
-        inputs=[audio_upload, audio_record, cc_audio_proc_transcription_method],
+        fn=cc_video_audio_upload,
+        inputs=[video_upload, audio_upload, cc_audio_proc_transcription_method],
         outputs=[
             cc_audio_proc_status_code,
             cc_audio_proc_time_taken,
