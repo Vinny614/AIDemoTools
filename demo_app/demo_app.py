@@ -1560,6 +1560,7 @@ with gr.Blocks(analytics_enabled=False) as call_center_audio_processing_block:
     )
 
 
+
 ### Text summarisation Example ###
 
 with gr.Blocks(analytics_enabled=False) as sum_text_block:
@@ -2265,7 +2266,13 @@ with gr.Blocks(
         pii_redaction_block.render()
     with gr.Tab("Key Information Extraction, Doc Intelligence (HTTP)"):
         di_llm_ext_names_block.render()
-    with gr.Tab("Batch Audio Processing (HTTP)"):
-        batch_audio_processing_block.render()
 
-# ...existing code...
+if __name__ == "__main__":
+    # Start server by running: `gradio demo_app.py`, then navigate to http://localhost:8000
+    demo.queue(default_concurrency_limit=4)
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=8000,
+        auth_message=auth_message,
+        auth=auth,
+    )
