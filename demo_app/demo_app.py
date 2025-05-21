@@ -2214,6 +2214,7 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
     )
 
 ## Version Control ###
+##  v0.8 - Updated with video/audio processing and markdown for Doc Intelligence
 ##  v0.7 - Audio Fixes, and updated with markdown for Doc Intelligence
 ##  v0.6 - Updated with markdown for Audio
 ##  v0.5 - Updated with markdown for Document Intelligenc
@@ -2228,7 +2229,7 @@ with gr.Blocks(
 ) as demo:
     gr.Markdown(
         (
-            "## Azure AI Services + OpenAI Pipeline Demos v0.5\n"
+            "## Azure AI Services + OpenAI Pipeline Demos v0.8\n"
             "\n\nThis demo app showcases a few examples of different processing pipelines that incorporate Azure AI "
             "Services and Azure OpenAI. Click through the tabs to see examples of different processing pipelines.\n\n"
             "This app is based on the [Azure Multimodal AI & LLM Processing Accelerator]"
