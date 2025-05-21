@@ -64,8 +64,8 @@ aoai_client = AzureOpenAI(
     azure_deployment=AOAI_LLM_DEPLOYMENT,
     azure_ad_token_provider=token_provider,
     api_version="2024-06-01",
-    timeout=30,
-    max_retries=0,
+    timeout=90,
+    max_retries=3,
 )
 
 TRANSCRIPTION_METHOD_TO_MIME_MAPPER = {
