@@ -2230,7 +2230,7 @@ with gr.Blocks(
 ) as demo:
     gr.Markdown(
         (
-            f"## Azure AI Services + OpenAI Pipeline Demos {version}\n\n"
+            f"## Briedcase the AI Toolbox {version}\n\n"
             "\n\nThis demo app showcases a few examples of different processing pipelines that incorporate Azure AI "
         ),
         show_label=False,
