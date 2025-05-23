@@ -2214,6 +2214,7 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
     )
 version="0.9"
 ## Version Control ###
+##  v0.9 - Updated with version and CSS
 ##  v0.8 - Updated with video/audio processing and markdown for Doc Intelligence
 ##  v0.7 - Audio Fixes, and updated with markdown for Doc Intelligence
 ##  v0.6 - Updated with markdown for Audio
@@ -2234,10 +2235,10 @@ with gr.Blocks(
         ),
         show_label=False,
     )
-    with gr.Tab("Azure Content Understanding Demos (HTTP)"):
-        simple_cu_examples_block.render()
-    with gr.Tab("Form Extraction with Confidence Scores (HTTP)"):
-        form_extraction_with_confidence_block.render()
+#    with gr.Tab("Azure Content Understanding Demos (HTTP)"):
+#        simple_cu_examples_block.render()
+#    with gr.Tab("Form Extraction with Confidence Scores (HTTP)"):
+#        form_extraction_with_confidence_block.render()
     with gr.Tab("Audio Processing (HTTP)"):
         call_center_audio_processing_block.render()
     with gr.Tab("Multimodal Document Intelligence Processing (HTTP)"):
