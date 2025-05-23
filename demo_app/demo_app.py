@@ -2212,7 +2212,7 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
             di_proc_output_md,
         ],
     )
-
+version="0.9"
 ## Version Control ###
 ##  v0.8 - Updated with video/audio processing and markdown for Doc Intelligence
 ##  v0.7 - Audio Fixes, and updated with markdown for Doc Intelligence
@@ -2222,18 +2222,15 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
 ##  v0.3 - Updated with markdown for PII Redaction
 
 with gr.Blocks(
-    title="Multimodal AI & LLM Processing Accelerator",
+    title=f"Briefcase the AI Toolbox {version}",
     theme=Base(),
     css="footer {visibility: hidden}",
     analytics_enabled=False,
 ) as demo:
     gr.Markdown(
         (
-            "## Azure AI Services + OpenAI Pipeline Demos v0.8\n"
+            f"## Azure AI Services + OpenAI Pipeline Demos {version}\n\n"
             "\n\nThis demo app showcases a few examples of different processing pipelines that incorporate Azure AI "
-            "Services and Azure OpenAI. Click through the tabs to see examples of different processing pipelines.\n\n"
-            "This app is based on the [Azure Multimodal AI & LLM Processing Accelerator]"
-            "(https://github.com/azure/multimodal-ai-llm-processing-accelerator)."
         ),
         show_label=False,
     )
