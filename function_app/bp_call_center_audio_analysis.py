@@ -47,9 +47,9 @@ transcriber = AzureSpeechTranscriber(
     aoai_whisper_async_client=aoai_whisper_async_client,
 )
 fast_transcription_definition = {
-    "locales": ["en-US"],
-    "profanityFilterMode": "Masked",
-    "diarizationEnabled": False,
+    "locales": ["en-UK"],
+    "profanityFilterMode": "None",
+    "diarizationEnabled": True,
     "wordLevelTimestampsEnabled": True,
 }
 aoai_whisper_kwargs = {
