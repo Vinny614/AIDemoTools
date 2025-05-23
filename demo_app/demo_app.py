@@ -26,7 +26,7 @@ from PIL import Image
 from moviepy import VideoFileClip  # <-- Added for video to mp3 conversion
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
-
+from azure.storage.blob import BlobServiceClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +58,8 @@ IS_COSMOSDB_AVAILABLE = COSMOSDB_ACCOUNT_ENDPOINT and COSMOSDB_DATABASE_NAME
 
 credential = DefaultAzureCredential()
 
+blob_service_client = BlobServiceClient(account_url=STORAGE_ACCOUNT_ENDPOINT, credential=credential)
+
 if not IS_COSMOSDB_AVAILABLE:
     logging.warning(
         (
@@ -78,6 +80,11 @@ else:
     blob_service_client = BlobServiceClient(
         account_url=STORAGE_ACCOUNT_ENDPOINT, credential=credential
     )
+
+### Add container for audio in and out
+input_container = "audio-in"
+output_container = "audio-transcript-out"
+
 
 
 # Set authentication values based on the environment variables, defaulting to auth enabled
@@ -2212,8 +2219,53 @@ with gr.Blocks(analytics_enabled=False) as di_proc_block:
             di_proc_output_md,
         ],
     )
-version="0.9"
+    
+# Gradio tab for audio upload and transcript viewing
+def audio_transcription_tab(blob_service_client, input_container="audio-in", output_container="audio-transcript-out"):
+    
+    def upload_to_blob(file):
+        try:
+            container_client = blob_service_client.get_container_client(input_container)
+            blob_name = os.path.basename(file)  # file is a string path
+            with open(file, "rb") as data:
+                container_client.upload_blob(blob_name, data, overwrite=True)
+            return f"✅ Uploaded {blob_name} to `{input_container}`."
+        except Exception as e:
+            return f"❌ Upload failed: {str(e)}"
+
+    def list_output_blobs():
+        container_client = blob_service_client.get_container_client(output_container)
+        blob_list = [blob.name for blob in container_client.list_blobs()]
+        return blob_list if blob_list else ["(No transcripts yet)"]
+
+    def show_selected_blob(name):
+        return f"📄 Selected transcript: {name}"
+    
+    with gr.Row():
+        with gr.Column():
+            audio_input = gr.File(
+                label="Upload audio or video file",
+                type="filepath",
+                file_types=["audio", "video"]
+                )
+            upload_btn = gr.Button("Upload")
+            upload_status = gr.Textbox(label="Status")
+
+            upload_btn.click(fn=upload_to_blob, inputs=audio_input, outputs=upload_status)
+
+        with gr.Column():
+                refresh_btn = gr.Button("Refresh Transcripts")
+                transcript_dropdown = gr.Dropdown(choices=[], label="Available Transcripts")
+                transcript_output = gr.Textbox(label="Selected Transcript")
+
+                refresh_btn.click(fn=list_output_blobs, inputs=[], outputs=transcript_dropdown)
+                transcript_dropdown.change(fn=show_selected_blob, inputs=transcript_dropdown, outputs=transcript_output)
+    
+    
+
+version="0.10"
 ## Version Control ###
+##  v0.10 - Updated with Audio in and out blob storage
 ##  v0.9 - Updated with version and CSS
 ##  v0.8 - Updated with video/audio processing and markdown for Doc Intelligence
 ##  v0.7 - Audio Fixes, and updated with markdown for Doc Intelligence
@@ -2253,6 +2305,9 @@ with gr.Blocks(
         pii_redaction_block.render()
     with gr.Tab("Key Information Extraction, Doc Intelligence (HTTP)"):
         di_llm_ext_names_block.render()
+    with gr.Tab("Audio Batch Processing (HTTP)"):
+        audio_transcription_tab(blob_service_client)
+
 
 if __name__ == "__main__":
     # Start server by running: `gradio demo_app.py`, then navigate to http://localhost:8000

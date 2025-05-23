@@ -2039,6 +2039,7 @@ resource webAppBlobContainerRoleAssignment 'Microsoft.Authorization/roleAssignme
         roleDefinitions.storageBlobDataContributor
       )
       principalId: webApp.identity.principalId
+      principalType: 'ServicePrincipal' // <-- Add this line
     }
   }
 ]
