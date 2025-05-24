@@ -27,7 +27,7 @@ param resourcePrefix = 'llm-proc'
 // To get your identity ID, run the following command in the Azure CLI:
 // > az ad signed-in-user show --query id -o tsv
 param additionalRoleAssignmentIdentityIds = [
-  'eb8f3052-245d-4147-8084-0b33533dbb93'
+  'daf5e80f-c230-4069-815f-cc11a35b836c'
 ] 
 // Storage service options
 param storageAccountName = 'llmprocstorage'

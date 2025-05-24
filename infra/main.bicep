@@ -1781,6 +1781,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
       FUNCTIONS_EXTENSION_VERSION: '~4'
       FUNCTIONS_WORKER_RUNTIME: 'python'
+      STORAGE_ACCOUNT_NAME: storageAccount.name // <-- Add this line
     })
   }
   dependsOn: [

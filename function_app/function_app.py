@@ -1,13 +1,16 @@
 import logging
 import os
+from datetime import datetime, timedelta
 
 import azure.functions as func
 import azure.durable_functions as df
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 from dotenv import load_dotenv
 from src.helpers.azure_function import (
     check_if_azurite_storage_emulator_is_running,
     check_if_env_var_is_set,
 )
+from azure.identity import DefaultAzureCredential
 
 load_dotenv()
 
@@ -51,19 +54,35 @@ IS_COSMOSDB_AVAILABLE = check_if_env_var_is_set(
 ## Added for SAS
 
 def generate_sas_url(container_name, blob_name):
-    blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AzureWebJobsStorage"))
-    container_client = blob_service_client.get_container_client(container_name)
+    # Use Managed Identity (DefaultAzureCredential) for authentication
+    credential = DefaultAzureCredential()
+    storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+    if not storage_account_name:
+        raise ValueError("STORAGE_ACCOUNT_NAME environment variable is not set.")
 
-    sas_token = generate_blob_sas(
-        account_name=blob_service_client.account_name,
-        container_name=container_name,
-        blob_name=blob_name,
-        account_key=blob_service_client.credential.account_key,
-        permission=BlobSasPermissions(read=True),
-        expiry=datetime.now() + timedelta(hours=1)
+    blob_service_client = BlobServiceClient(
+        account_url=f"https://{storage_account_name}.blob.core.windows.net",
+        credential=credential
     )
 
-    return f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+    # Get a user delegation key
+    expiry_time = datetime.utcnow() + timedelta(hours=1)
+    user_delegation_key = blob_service_client.get_user_delegation_key(
+        key_start_time=datetime.utcnow(),
+        key_expiry_time=expiry_time
+    )
+
+    # Generate SAS token using the user delegation key
+    sas_token = generate_blob_sas(
+        account_name=storage_account_name,
+        container_name=container_name,
+        blob_name=blob_name,
+        permission=BlobSasPermissions(read=True),
+        expiry=expiry_time,
+        user_delegation_key=user_delegation_key
+    )
+
+    return f"https://{storage_account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
 
 
 
