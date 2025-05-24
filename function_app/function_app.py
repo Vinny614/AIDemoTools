@@ -46,6 +46,27 @@ IS_COSMOSDB_AVAILABLE = check_if_env_var_is_set(
     "COSMOSDB_DATABASE_NAME"
 ) and check_if_env_var_is_set("CosmosDbConnectionSetting__accountEndpoint")
 
+
+### SAS URL generation function for blob storage
+## Added for SAS
+
+def generate_sas_url(container_name, blob_name):
+    blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AzureWebJobsStorage"))
+    container_client = blob_service_client.get_container_client(container_name)
+
+    sas_token = generate_blob_sas(
+        account_name=blob_service_client.account_name,
+        container_name=container_name,
+        blob_name=blob_name,
+        account_key=blob_service_client.credential.account_key,
+        permission=BlobSasPermissions(read=True),
+        expiry=datetime.now() + timedelta(hours=1)
+    )
+
+    return f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+
+
+
 ### Register blueprints for HTTP functions, provided the relevant backend AI services are deployed
 if IS_AOAI_DEPLOYED:
     from bp_summarize_text import bp_summarize_text
@@ -119,21 +140,36 @@ if (
 )
 def audio_blob_trigger(inputblob2: func.InputStream):
     logging.warning("🔥 Blob trigger fired!")
-    logging.warning(f"Name: {inputblob2.name}")
-    logging.warning(f"Size: {inputblob2.length or 'Unknown'} bytes")
+    blob_name = inputblob2.name.replace("audio-in/", "")
+    logging.warning(f"Blob name: {blob_name}")
 
-    # Optional: read first few bytes
     try:
-        preview = inputblob2.read(100)
-        logging.warning(f"First 100 bytes: {preview[:20]}...")
+        sas_url = generate_sas_url("audio-in", blob_name)
+        logging.warning(f"✅ SAS URL: {sas_url}")
     except Exception as e:
-        logging.error(f"Failed to read blob stream: {e}")
+        logging.error(f"❌ Error generating SAS URL: {e}")
 
 
 @app.orchestration_trigger(context_name="context")
 def audio_processing_orchestrator(context):
     """Orchestrates the audio processing pipeline."""
-    pass  # Implement your logic here
+    input_data = context.get_input()
+    logging.info(f"[Orchestrator] Started with input: {input_data}")
+
+    sas_url = input_data.get("sas_url")
+    blob_name = input_data.get("blob_name")
+    logging.info(f"[Orchestrator] About to call start_batch_activity with sas_url={sas_url}, blob_name={blob_name}")
+
+    batch_info = yield context.call_activity("start_batch_activity", {"sas_url": sas_url, "blob_name": blob_name})
+    logging.info(f"[Orchestrator] Returned from start_batch_activity: {batch_info}")
+
+    logging.info(f"[Orchestrator] About to call poll_batch_activity with batch_info={batch_info}")
+    result_data = yield context.call_activity("poll_batch_activity", batch_info)
+    logging.info(f"[Orchestrator] Returned from poll_batch_activity: {result_data}")
+
+    logging.info(f"[Orchestrator] About to call write_output_activity with result_data={result_data}")
+    yield context.call_activity("write_output_activity", result_data)
+    logging.info(f"[Orchestrator] Finished write_output_activity with result_data: {result_data}")
 
 @app.activity_trigger(input_name="input_data")
 def start_batch_activity(input_data):

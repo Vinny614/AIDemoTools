@@ -11,7 +11,10 @@
         "AOAI_LLM_DEPLOYMENT": "Copy `AOAI_LLM_DEPLOYMENT` from `.azure/<env>/.env` - E.g: 'gpt-4o-2024-05-13-globalstandard'",
         "DOC_INTEL_ENDPOINT": "Copy `DOC_INTEL_ENDPOINT` from `.azure/<env>/.env` - E.g: 'https://<doc-intel-resource-name>.cognitiveservices.azure.com/'",
         "SPEECH_ENDPOINT": "Copy `SPEECH_ENDPOINT` from `.azure/<env>/.env` - E.g: 'https://<speech-resource-name>.cognitiveservices.azure.com/'",
-        "LANGUAGE_ENDPOINT": "Copy `LANGUAGE_ENDPOINT` from `.azure/<env>/.env` - E.g: 'https://<language-resource-name>.cognitiveservices.azure.com/'"
+        "LANGUAGE_ENDPOINT": "Copy `LANGUAGE_ENDPOINT` from `.azure/<env>/.env` - E.g: 'https://<language-resource-name>.cognitiveservices.azure.com/'",
+        "STORAGE_ACCOUNT_ENDPOINT": "Copy `storageAccountEndpolint` from `.azure/<env>/.env` - E.g: 'https://<storage_account_name>.blob.core.windows.net/'",
+        "STORAGE_ACCOUNT_NAME": "copy `STORAGE_ACCOUNT_NAME` from `.azure/<env>/.env` - E.g: 'llmprocstoragesimv6'",
+        "STORAGE_ACCOUNT_KEY": "copy `STORAGE_ACCOUNT_KEY` from `.azure/<env>/.env` - E.g: 'your_storage_account_key_here'"
     },
     "Host": {
         "LocalHttpPort": 7071,
