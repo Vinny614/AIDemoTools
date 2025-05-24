@@ -111,15 +111,24 @@ if (
 
 # --- Durable Audio Pipeline Registration ---
 
+@app.function_name("audio_blob_trigger")
 @app.blob_trigger(
-    arg_name="inputblob2",  # <-- Make this unique!
-    path="audio-in/{name}",  # <-- Use your actual container name
+    arg_name="inputblob2",
+    path="audio-in/{name}",
     connection="AzureWebJobsStorage",
 )
-def audio_blob_trigger(inputblob2):
-    """Triggered when a new audio blob is uploaded."""
-    # Start orchestration here or call your orchestrator
-    pass  # Implement your logic here
+def audio_blob_trigger(inputblob2: func.InputStream):
+    logging.warning("🔥 Blob trigger fired!")
+    logging.warning(f"Name: {inputblob2.name}")
+    logging.warning(f"Size: {inputblob2.length or 'Unknown'} bytes")
+
+    # Optional: read first few bytes
+    try:
+        preview = inputblob2.read(100)
+        logging.warning(f"First 100 bytes: {preview[:20]}...")
+    except Exception as e:
+        logging.error(f"Failed to read blob stream: {e}")
+
 
 @app.orchestration_trigger(context_name="context")
 def audio_processing_orchestrator(context):
