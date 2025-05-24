@@ -3,6 +3,8 @@
 name: multimodal-llm-ai-processing-accelerator
 metadata:
   template: multimodal-llm-ai-processing-accelerator@0.0.1
+parameters:
+  durableFunctionsHttpStartUrl: ${DurableFunctions_HttpStart_Url}
 hooks:
   postprovision: 
     # Create all content understanding analyzers defined in the content_understanding_schemas.json file

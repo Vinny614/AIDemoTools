@@ -1,6 +1,9 @@
 @description('The name of the Function App. This will become part of the URL (e.g. https://{functionAppName}.azurewebsites.net) and must be unique across Azure.')
 param functionAppName string = 'ai-llm-processing-func'
 
+@description('Durable Functions HTTP start URL')
+param durableFunctionsHttpStartUrl string
+
 @description('Whether to use a premium or consumption SKU for the function\'s app service plan. Premium plans are recommended for production workloads, especially non-HTTP-triggered functions.')
 param functionAppUsePremiumSku bool = false
 
@@ -1782,6 +1785,8 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       FUNCTIONS_EXTENSION_VERSION: '~4'
       FUNCTIONS_WORKER_RUNTIME: 'python'
       STORAGE_ACCOUNT_NAME: storageAccount.name // <-- Add this line
+      DurableFunctions_HttpStart_Url: durableFunctionsHttpStartUrl
+
     })
   }
   dependsOn: [

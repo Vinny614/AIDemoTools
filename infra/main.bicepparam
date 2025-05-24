@@ -2,12 +2,14 @@ using 'main.bicep'
 
 param tags = {}
 
+
 //// Function & web apps
 param appendUniqueUrlSuffix = true
 
 // Function app
 param functionAppName = 'ai-llm-processing-func'
 param functionAppUsePremiumSku = true
+param durableFunctionsHttpStartUrl = 'https://ai-llm-processing-func-simv6.azurewebsites.net/runtime/webhooks/durabletask/orchestrators/audio_processing_orchestrator?code=YOUR-FUNCTION-KEY'
 
 // Web app
 // If web app deployment is not required, set deployWebApp to false and remove the webapp service deployment from the azure.yaml file

@@ -1,9 +1,12 @@
 import logging
 import os
 from datetime import datetime, timedelta
+import json
+import requests
 
 import azure.functions as func
 import azure.durable_functions as df
+from azure.durable_functions import DurableOrchestrationClient
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 from dotenv import load_dotenv
 from src.helpers.azure_function import (
@@ -11,6 +14,8 @@ from src.helpers.azure_function import (
     check_if_env_var_is_set,
 )
 from azure.identity import DefaultAzureCredential
+from azure.identity import ManagedIdentityCredential
+
 
 load_dotenv()
 
@@ -159,16 +164,45 @@ if (
 )
 def audio_blob_trigger(inputblob2: func.InputStream):
     logging.warning("🔥 Blob trigger fired!")
+
     blob_name = inputblob2.name.replace("audio-in/", "")
     logging.warning(f"Blob name: {blob_name}")
 
     try:
         sas_url = generate_sas_url("audio-in", blob_name)
         logging.warning(f"✅ SAS URL: {sas_url}")
+
+        payload = {
+            "input": {
+                "sas_url": sas_url,
+                "blob_name": blob_name
+            }
+        }
+
+        # Request a token for Azure Functions
+        credential = ManagedIdentityCredential()
+        token = credential.get_token("https://management.azure.com/.default").token
+
+        # Use the management endpoint to start the orchestration
+        function_app_name = os.getenv("WEBSITE_SITE_NAME")
+        region = os.getenv("REGION_NAME", "uksouth")
+        orchestration_url = f"https://{function_app_name}.azurewebsites.net/runtime/webhooks/durabletask/orchestrators/audio_processing_orchestrator"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(orchestration_url, headers=headers, json=payload)
+
+        if response.status_code == 202:
+            logging.info("🎯 Orchestration started successfully.")
+        else:
+            logging.error(f"❌ Failed to start orchestration: {response.status_code} {response.text}")
+
     except Exception as e:
-        logging.error(f"❌ Error generating SAS URL: {e}")
-
-
+        logging.error(f"❌ Error in blob trigger: {e}")
+                
 @app.orchestration_trigger(context_name="context")
 def audio_processing_orchestrator(context):
     """Orchestrates the audio processing pipeline."""
