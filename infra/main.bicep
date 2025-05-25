@@ -1777,6 +1777,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       AzureWebJobsStorage__serviceUri: storageAccountBlobUri
       AzureWebJobsStorage__queueServiceUri: storageAccountQueueUri
       AzureWebJobsStorage__tableServiceUri: storageAccountTableUri
+      AzureWebJobsDisableDurableTaskAuth: 'true'
       WEBSITE_CONTENTSHARE: functionContentShareName
       WEBSITE_CONTENTAZUREFILECONNECTIONSTRING: storageAccountConnectionString
       WEBSITE_CONTENTOVERVNET: '1'

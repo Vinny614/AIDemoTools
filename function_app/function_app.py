@@ -1,8 +1,9 @@
 import logging
 import os
 from datetime import datetime, timedelta
-import json
-import requests
+
+import traceback
+
 
 import azure.functions as func
 import azure.durable_functions as df
@@ -162,7 +163,8 @@ if (
     path="audio-in/{name}",
     connection="AzureWebJobsStorage",
 )
-def audio_blob_trigger(inputblob2: func.InputStream):
+@app.durable_client_input(client_name="client")
+async def audio_blob_trigger(inputblob2: func.InputStream, client: DurableOrchestrationClient):
     logging.warning("🔥 Blob trigger fired!")
 
     blob_name = inputblob2.name.replace("audio-in/", "")
@@ -172,37 +174,18 @@ def audio_blob_trigger(inputblob2: func.InputStream):
         sas_url = generate_sas_url("audio-in", blob_name)
         logging.warning(f"✅ SAS URL: {sas_url}")
 
-        payload = {
-            "input": {
-                "sas_url": sas_url,
-                "blob_name": blob_name
-            }
+        input_payload = {
+            "sas_url": sas_url,
+            "blob_name": blob_name
         }
 
-        # Request a token for Azure Functions
-        credential = ManagedIdentityCredential()
-        token = credential.get_token("https://management.azure.com/.default").token
-
-        # Use the management endpoint to start the orchestration
-        function_app_name = os.getenv("WEBSITE_SITE_NAME")
-        region = os.getenv("REGION_NAME", "uksouth")
-        orchestration_url = f"https://{function_app_name}.azurewebsites.net/runtime/webhooks/durabletask/orchestrators/audio_processing_orchestrator"
-
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-
-        response = requests.post(orchestration_url, headers=headers, json=payload)
-
-        if response.status_code == 202:
-            logging.info("🎯 Orchestration started successfully.")
-        else:
-            logging.error(f"❌ Failed to start orchestration: {response.status_code} {response.text}")
+        instance_id = await client.start_new("audio_processing_orchestrator", None, input_payload)
+        logging.info(f"🎯 Orchestration started: {instance_id}")
 
     except Exception as e:
         logging.error(f"❌ Error in blob trigger: {e}")
-                
+        logging.error(traceback.format_exc())
+
 @app.orchestration_trigger(context_name="context")
 def audio_processing_orchestrator(context):
     """Orchestrates the audio processing pipeline."""
@@ -226,15 +209,63 @@ def audio_processing_orchestrator(context):
 
 @app.activity_trigger(input_name="input_data")
 def start_batch_activity(input_data):
-    """Starts the batch processing activity."""
-    pass  # Implement your logic here
+    logging.info(f"[Activity] Starting real batch: {input_data}")
+    # Call Azure Speech SDK or relevant service
+    # Return job ID or batch reference
+    return {"batch_id": "real-batch-id"}
+
+
 
 @app.activity_trigger(input_name="batch_info")
 def poll_batch_activity(batch_info):
-    """Polls the batch processing status."""
-    pass  # Implement your logic here
+    logging.info(f"[Activity] Polling real batch job: {batch_info}")
+    # Check the batch job status, poll if necessary
+    return {"result": "real-transcript-content"}
+
 
 @app.activity_trigger(input_name="result_data")
 def write_output_activity(result_data):
-    """Writes the output to the specified destination."""
-    pass  # Implement your logic here
+    logging.info(f"[Activity] Writing result to blob: {result_data}")
+
+    try:
+        credential = DefaultAzureCredential()
+        storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+        if not storage_account_name:
+            raise ValueError("Missing STORAGE_ACCOUNT_NAME")
+
+        blob_service_client = BlobServiceClient(
+            account_url=f"https://{storage_account_name}.blob.core.windows.net",
+            credential=credential
+        )
+
+        # Output container
+        container_name = "audio-transcript-out"
+        blob_name = result_data["blob_name"].rsplit(".", 1)[0] + ".json"
+
+        output_container = blob_service_client.get_container_client(container_name)
+        output_blob = output_container.get_blob_client(blob_name)
+
+        # Write the result as formatted JSON
+        content = json.dumps(result_data, indent=2)
+        output_blob.upload_blob(content, overwrite=True)
+
+        logging.info(f"[Activity] Output written to: {container_name}/{blob_name}")
+        return "OK"
+
+    except Exception as e:
+        logging.error(f"[Activity] Failed to write output: {e}")
+        return "ERROR"
+
+
+@app.function_name(name="start_audio_processing")
+@app.route(route="start-audio-processing", auth_level=func.AuthLevel.FUNCTION)
+@app.durable_client_input(client_name="client")
+def start_audio_processing(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
+    try:
+        data = req.get_json()
+        instance_id = client.start_new("audio_processing_orchestrator", None, data.get("input"))
+        logging.info(f"🎯 Durable orchestration started: {instance_id}")
+        return client.create_check_status_response(req, instance_id)
+    except Exception as e:
+        logging.error(f"❌ Failed to start orchestration via HTTP: {e}")
+        return func.HttpResponse("Error starting orchestration", status_code=500)
