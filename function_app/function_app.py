@@ -16,6 +16,7 @@ from src.helpers.azure_function import (
     check_if_env_var_is_set,
 )
 from azure.identity import DefaultAzureCredential
+from azure.core.exceptions import ResourceNotFoundError
 
 load_dotenv()
 
@@ -52,33 +53,7 @@ IS_STORAGE_ACCOUNT_AVAILABLE = (
 ])
 IS_COSMOSDB_AVAILABLE = check_if_env_var_is_set("COSMOSDB_DATABASE_NAME") and check_if_env_var_is_set("CosmosDbConnectionSetting__accountEndpoint")
 
-### Function to generate SAS URL for a blob in Azure Storage
-
-# from azure.storage.blob import generate_blob_sas, BlobSasPermissions
-# from datetime import datetime, timedelta
-# import os
-
-# def generate_sas_url(container_name, blob_name):
-#     account_name = os.getenv("STORAGE_ACCOUNT_NAME")
-#     account_key = os.getenv("STORAGE_ACCOUNT_KEY")
-
-#     if not account_name or not account_key:
-#         raise ValueError("Missing storage account name or key.")
-
-#     now = datetime.utcnow().replace(microsecond=0)
-#     sas_token = generate_blob_sas(
-#         account_name=account_name,
-#         container_name=container_name,
-#         blob_name=blob_name,
-#         account_key=account_key,
-#         permission=BlobSasPermissions(read=True),
-#         start=now - timedelta(minutes=5),
-#         expiry=now + timedelta(hours=1)
-#     )
-
-#     return f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
-
-### Registering blueprints based on deployment status
+### Registering Blueprints
 
 if IS_AOAI_DEPLOYED:
     from bp_summarize_text import bp_summarize_text
@@ -126,9 +101,14 @@ if IS_STORAGE_ACCOUNT_AVAILABLE and IS_COSMOSDB_AVAILABLE and IS_AOAI_DEPLOYED a
     def extract_blob_pdf_fields_to_cosmosdb(inputblob, outputdocument):
         output_result = get_structured_extraction_func_outputs(inputblob)
         outputdocument.set(func.Document.from_dict(output_result))
+
+
 ### file waiting
 
-def wait_for_blob_ready(blob_url, max_retries=6, delay=5):
+import aiohttp
+from azure.storage.blob.aio import BlobServiceClient
+
+async def wait_for_blob_ready_async(blob_url, max_retries=6, delay=5):
     try:
         credential = DefaultAzureCredential()
         blob_service_client = BlobServiceClient(
@@ -140,15 +120,18 @@ def wait_for_blob_ready(blob_url, max_retries=6, delay=5):
         blob_client = container_client.get_blob_client(blob_name)
 
         for _ in range(max_retries):
-            props = blob_client.get_blob_properties()
+            props = await blob_client.get_blob_properties()
             if props.size > 0:
+                await blob_service_client.close()
                 return True
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
+        await blob_service_client.close()
         return False
     except Exception as e:
         logging.error(f"❌ Error checking blob readiness: {e}")
         return False
+
 
 ### Blob trigger for audio processing using Azure Durable Functions
 
@@ -168,13 +151,17 @@ async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrc
     try:
         await asyncio.sleep(7)  # Simulate some processing delay
 
-        # Build plain blob URL using Trusted Azure Services model (no SAS)
         storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
         if not storage_account_name:
             raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
 
         content_url = f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
         logging.warning(f"✅ Recordings URL: {content_url}")
+
+        # 🔍 NEW: Wait until blob is actually ready before triggering orchestration
+        if not await wait_for_blob_ready_async(content_url):
+            logging.error("❌ Blob not ready after retries. Skipping orchestration.")
+            return
 
         input_payload = {
             "content_url": content_url,
@@ -187,6 +174,7 @@ async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrc
     except Exception as e:
         logging.error(f"❌ Error in blob trigger: {e}")
         logging.error(traceback.format_exc())
+
 
 
 @app.orchestration_trigger(context_name="context")
@@ -227,8 +215,10 @@ def start_batch_activity(input_data):
     if not storage_account_name:
         raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
         # Wait for the blob to be fully available
-    if not wait_for_blob_ready(content_url):
+    if not wait_for_blob_ready_async(content_url):
         raise Exception(f"Blob {blob_name} not ready after retries. Aborting transcription.")
+    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    logging.warning(f"Token obtained for: {token.token[:20]}...")
 
     transcription_url = f"{speech_endpoint}/speechtotext/v3.1/transcriptions"
     payload = {
