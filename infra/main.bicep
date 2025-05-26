@@ -616,7 +616,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowBlobPublicAccess: false
     publicNetworkAccess: storageServicesAndKVAllowPublicAccess ? 'Enabled' : 'Disabled'
     networkAcls: {
-      bypass: 'Logging,Metrics' // Allow logging and metrics to bypass network rules
+      bypass: 'AzureServices,Logging,Metrics' // Allow logging and metrics to bypass network rules
       // Set defaultAction to Allow when public access is enabled and no IP ranges are specified
       defaultAction: (storageServicesAndKVAllowPublicAccess && empty(storageServicesAndKVAllowedExternalIpsOrIpRanges))
         ? 'Allow'
