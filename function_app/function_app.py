@@ -215,8 +215,10 @@ def start_batch_activity(input_data):
     if not storage_account_name:
         raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
         # Wait for the blob to be fully available
-    if not wait_for_blob_ready_async(content_url):
+    if not asyncio.run(wait_for_blob_ready_async(content_url)):
         raise Exception(f"Blob {blob_name} not ready after retries. Aborting transcription.")
+
+    
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
     logging.warning(f"Token obtained for: {token.token[:20]}...")
 
