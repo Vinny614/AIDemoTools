@@ -126,6 +126,29 @@ if IS_STORAGE_ACCOUNT_AVAILABLE and IS_COSMOSDB_AVAILABLE and IS_AOAI_DEPLOYED a
     def extract_blob_pdf_fields_to_cosmosdb(inputblob, outputdocument):
         output_result = get_structured_extraction_func_outputs(inputblob)
         outputdocument.set(func.Document.from_dict(output_result))
+### file waiting
+
+def wait_for_blob_ready(blob_url, max_retries=6, delay=5):
+    try:
+        credential = DefaultAzureCredential()
+        blob_service_client = BlobServiceClient(
+            account_url=f"https://{os.getenv('STORAGE_ACCOUNT_NAME')}.blob.core.windows.net",
+            credential=credential
+        )
+        container_client = blob_service_client.get_container_client("audio-in")
+        blob_name = blob_url.split("/")[-1]
+        blob_client = container_client.get_blob_client(blob_name)
+
+        for _ in range(max_retries):
+            props = blob_client.get_blob_properties()
+            if props.size > 0:
+                return True
+            time.sleep(delay)
+
+        return False
+    except Exception as e:
+        logging.error(f"❌ Error checking blob readiness: {e}")
+        return False
 
 ### Blob trigger for audio processing using Azure Durable Functions
 
@@ -138,22 +161,29 @@ if IS_STORAGE_ACCOUNT_AVAILABLE and IS_COSMOSDB_AVAILABLE and IS_AOAI_DEPLOYED a
 @app.durable_client_input(client_name="client")
 async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrchestrationClient):
     logging.warning("🔥 Blob trigger fired!")
+    
     blob_name = inputblob2.name.replace("audio-in/", "")
     logging.warning(f"Blob name: {blob_name}")
+
     try:
         await asyncio.sleep(7)  # Simulate some processing delay
 
-        # Generate plain blob URL (no SAS needed)
+        # Build plain blob URL using Trusted Azure Services model (no SAS)
         storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
         if not storage_account_name:
             raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
 
-        audio_url = f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
-        logging.warning(f"✅ Blob URL: {audio_url}")
+        content_url = f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
+        logging.warning(f"✅ Recordings URL: {content_url}")
 
-        input_payload = {"sas_url": audio_url, "blob_name": blob_name}
+        input_payload = {
+            "content_url": content_url,
+            "blob_name": blob_name
+        }
+
         instance_id = await client.start_new("audio_processing_orchestrator", None, input_payload)
         logging.info(f"🎯 Orchestration started: {instance_id}")
+
     except Exception as e:
         logging.error(f"❌ Error in blob trigger: {e}")
         logging.error(traceback.format_exc())
@@ -161,43 +191,78 @@ async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrc
 
 @app.orchestration_trigger(context_name="context")
 def audio_processing_orchestrator(context):
-    input_data = context.get_input()
-    logging.info(f"[Orchestrator] Started with input: {input_data}")
-    sas_url = input_data.get("sas_url")
-    blob_name = input_data.get("blob_name")
-    batch_info = yield context.call_activity("start_batch_activity", {"sas_url": sas_url, "blob_name": blob_name})
-    result_data = yield context.call_activity("poll_batch_activity", batch_info)
-    yield context.call_activity("write_output_activity", result_data)
+    try:
+        input_data = context.get_input()
+        logging.info(f"[Orchestrator] Started with input: {input_data}")
+        content_url = input_data.get("content_url")  # ✅ fixed key here
+        blob_name = input_data.get("blob_name")
+
+        batch_info = yield context.call_activity("start_batch_activity", {
+            "content_url": content_url,
+            "blob_name": blob_name
+        })
+
+        result_data = yield context.call_activity("poll_batch_activity", batch_info)
+        logging.info(f"Calling activity with input: {result_data}")
+
+        if not result_data or "error" in result_data:
+            logging.error(f"❌ Error in batch processing: {result_data.get('error')}")
+            return {"error": result_data.get("error")}
+
+        yield context.call_activity("write_output_activity", result_data)
+
+    except Exception as e:
+        logging.error(f"❌ Orchestration failed: {e}")
+        return {"error": str(e)}
+
+
 
 @app.activity_trigger(input_name="input_data")
 def start_batch_activity(input_data):
     logging.warning(f"[Activity] Received input: {input_data}")
-    sas_url = input_data["sas_url"]
+    content_url = input_data["content_url"]
     blob_name = input_data["blob_name"]
+
+    storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+    if not storage_account_name:
+        raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
+        # Wait for the blob to be fully available
+    if not wait_for_blob_ready(content_url):
+        raise Exception(f"Blob {blob_name} not ready after retries. Aborting transcription.")
+
     transcription_url = f"{speech_endpoint}/speechtotext/v3.1/transcriptions"
     payload = {
         "displayName": f"Transcription - {blob_name}",
         "locale": "en-GB",
-        "contentUrls": [sas_url],
+        "contentUrls": [
+            f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
+        ],
         "properties": {
             "wordLevelTimestampsEnabled": True,
-            "diarizationEnabled": True,
+            "diarizationEnabled": False,
             "punctuationMode": "DictatedAndAutomatic",
-            "profanityFilterMode": "none",
+            "profanityFilterMode": "None",
             "transcriptionMode": "Batch",
-            "timeToLive": "PT1H"  # Optional: how long to retain
+            "timeToLive": "PT1H"
         }
     }
+
+
     credential = DefaultAzureCredential()
     token = credential.get_token("https://cognitiveservices.azure.com/.default").token
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+
     response = requests.post(transcription_url, json=payload, headers=headers)
     if response.status_code not in [200, 201, 202]:
         logging.error(f"[Activity] Failed to start transcription: {response.status_code} - {response.text}")
         raise Exception("Batch transcription start failed")
+
     transcription_location = response.headers["Location"]
     logging.warning(f"[Activity] Transcription started: {transcription_location}")
+
     return {"status_url": transcription_location, "blob_name": blob_name}
+
+
 
 @app.activity_trigger(input_name="batch_info")
 def poll_batch_activity(batch_info):
