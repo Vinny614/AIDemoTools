@@ -1722,6 +1722,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         allowedOrigins: [
           '*'
         ]
+        
       }
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
       scmIpSecurityRestrictionsUseMain: true // Use same IP restrictions for the SCM deployment site as the main site
@@ -1787,6 +1788,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       FUNCTIONS_WORKER_RUNTIME: 'python'
       STORAGE_ACCOUNT_NAME: storageAccount.name // <-- Add this line
       DurableFunctions_HttpStart_Url: durableFunctionsHttpStartUrl
+      SPEECH_RESOURCE_ID: speech.id
 
     })
   }
