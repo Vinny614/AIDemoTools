@@ -6,6 +6,7 @@ import traceback
 import requests
 import asyncio
 import time
+from datetime import datetime, timedelta
 import azure.functions as func
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
@@ -33,6 +34,8 @@ if not speech_endpoint:
 
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 
+### Get Environment Variables and Check Deployments
+
 IS_CONTENT_UNDERSTANDING_DEPLOYED = check_if_env_var_is_set("CONTENT_UNDERSTANDING_ENDPOINT")
 IS_AOAI_DEPLOYED = check_if_env_var_is_set("AOAI_ENDPOINT")
 IS_DOC_INTEL_DEPLOYED = check_if_env_var_is_set("DOC_INTEL_ENDPOINT")
@@ -49,33 +52,33 @@ IS_STORAGE_ACCOUNT_AVAILABLE = (
 ])
 IS_COSMOSDB_AVAILABLE = check_if_env_var_is_set("COSMOSDB_DATABASE_NAME") and check_if_env_var_is_set("CosmosDbConnectionSetting__accountEndpoint")
 
-def generate_sas_url(container_name, blob_name):
-    credential = DefaultAzureCredential()
-    storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
-    if not storage_account_name:
-        raise ValueError("STORAGE_ACCOUNT_NAME environment variable is not set.")
+### Function to generate SAS URL for a blob in Azure Storage
 
-    blob_service_client = BlobServiceClient(
-        account_url=f"https://{storage_account_name}.blob.core.windows.net",
-        credential=credential
-    )
+# from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+# from datetime import datetime, timedelta
+# import os
 
-    expiry_time = datetime.utcnow() + timedelta(hours=1)
-    user_delegation_key = blob_service_client.get_user_delegation_key(
-        key_start_time=datetime.utcnow(),
-        key_expiry_time=expiry_time
-    )
+# def generate_sas_url(container_name, blob_name):
+#     account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+#     account_key = os.getenv("STORAGE_ACCOUNT_KEY")
 
-    sas_token = generate_blob_sas(
-        account_name=storage_account_name,
-        container_name=container_name,
-        blob_name=blob_name,
-        permission=BlobSasPermissions(read=True),
-        expiry=expiry_time,
-        user_delegation_key=user_delegation_key
-    )
+#     if not account_name or not account_key:
+#         raise ValueError("Missing storage account name or key.")
 
-    return f"https://{storage_account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+#     now = datetime.utcnow().replace(microsecond=0)
+#     sas_token = generate_blob_sas(
+#         account_name=account_name,
+#         container_name=container_name,
+#         blob_name=blob_name,
+#         account_key=account_key,
+#         permission=BlobSasPermissions(read=True),
+#         start=now - timedelta(minutes=5),
+#         expiry=now + timedelta(hours=1)
+#     )
+
+#     return f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+
+### Registering blueprints based on deployment status
 
 if IS_AOAI_DEPLOYED:
     from bp_summarize_text import bp_summarize_text
@@ -124,6 +127,8 @@ if IS_STORAGE_ACCOUNT_AVAILABLE and IS_COSMOSDB_AVAILABLE and IS_AOAI_DEPLOYED a
         output_result = get_structured_extraction_func_outputs(inputblob)
         outputdocument.set(func.Document.from_dict(output_result))
 
+### Blob trigger for audio processing using Azure Durable Functions
+
 @app.function_name("audio_blob_trigger")
 @app.blob_trigger(
     arg_name="inputblob2",
@@ -136,15 +141,23 @@ async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrc
     blob_name = inputblob2.name.replace("audio-in/", "")
     logging.warning(f"Blob name: {blob_name}")
     try:
-        await asyncio.sleep(3)  # Simulate some processing delay
-        sas_url = generate_sas_url("audio-in", blob_name)
-        logging.warning(f"✅ SAS URL: {sas_url}")
-        input_payload = {"sas_url": sas_url, "blob_name": blob_name}
+        await asyncio.sleep(7)  # Simulate some processing delay
+
+        # Generate plain blob URL (no SAS needed)
+        storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+        if not storage_account_name:
+            raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
+
+        audio_url = f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
+        logging.warning(f"✅ Blob URL: {audio_url}")
+
+        input_payload = {"sas_url": audio_url, "blob_name": blob_name}
         instance_id = await client.start_new("audio_processing_orchestrator", None, input_payload)
         logging.info(f"🎯 Orchestration started: {instance_id}")
     except Exception as e:
         logging.error(f"❌ Error in blob trigger: {e}")
         logging.error(traceback.format_exc())
+
 
 @app.orchestration_trigger(context_name="context")
 def audio_processing_orchestrator(context):
@@ -168,8 +181,11 @@ def start_batch_activity(input_data):
         "contentUrls": [sas_url],
         "properties": {
             "wordLevelTimestampsEnabled": True,
+            "diarizationEnabled": True,
             "punctuationMode": "DictatedAndAutomatic",
-            "profanityFilterMode": "Masked"
+            "profanityFilterMode": "none",
+            "transcriptionMode": "Batch",
+            "timeToLive": "PT1H"  # Optional: how long to retain
         }
     }
     credential = DefaultAzureCredential()
@@ -186,7 +202,81 @@ def start_batch_activity(input_data):
 @app.activity_trigger(input_name="batch_info")
 def poll_batch_activity(batch_info):
     logging.warning(f"[Activity] Polling real batch job: {batch_info}")
-    return {"result": "real-transcript-content", "blob_name": batch_info["blob_name"]}
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://cognitiveservices.azure.com/.default").token
+    headers = {"Authorization": f"Bearer {token}"}
+
+    status_url = batch_info["status_url"]
+    blob_name = batch_info["blob_name"]
+
+    for attempt in range(30):
+        response = requests.get(status_url, headers=headers)
+        if response.status_code != 200:
+            logging.error(f"❌ Polling failed: {response.status_code} - {response.text}")
+            raise Exception(f"Polling failed: {response.status_code} - {response.text}")
+
+        data = response.json()
+        status = data.get("status")
+        logging.info(f"[Polling Attempt {attempt + 1}] Status: {status}")
+
+        if status == "Succeeded":
+            transcript_url = data.get("resultsUrls", {}).get("transcription")
+
+            if not transcript_url:
+                logging.warning("⚠️ No 'transcription' in resultsUrls. Trying files fallback...")
+                files_url = data.get("links", {}).get("files")
+                if not files_url:
+                    raise Exception("No fallback 'files' link provided by API.")
+
+                logging.info(f"🔍 Fetching file list from: {files_url}")
+                files_response = requests.get(files_url, headers=headers)
+                files_response.raise_for_status()
+                files = files_response.json().get("values", [])
+
+                logging.info(f"🗂️ Available files: {[f.get('name') for f in files]}")
+                transcription_file = next((f for f in files if f.get("kind") == "Transcription"), None)
+                if not transcription_file:
+                    logging.warning("⏳ Transcription file not ready. Retrying...")
+                    time.sleep(15)
+                    continue
+
+                transcript_url = transcription_file.get("links", {}).get("contentUrl")
+                if not transcript_url:
+                    raise Exception("Transcription file found but missing 'contentUrl'.")
+
+            logging.info(f"📥 Fetching transcript JSON from: {transcript_url}")
+            result_response = requests.get(transcript_url)
+            result_response.raise_for_status()
+            result_json = result_response.json()
+
+            phrases = result_json.get("combinedRecognizedPhrases", [])
+            segments = [
+                {
+                    "speaker": p.get("speaker"),
+                    "text": p.get("display"),
+                    "offset": p.get("offset"),
+                    "duration": p.get("duration")
+                }
+                for p in phrases
+            ]
+            full_text = " ".join([p.get("display", "") for p in phrases])
+            speakers = list({p.get("speaker") for p in phrases if "speaker" in p})
+
+            return {
+                "result": {
+                    "transcript": full_text,
+                    "segments": segments,
+                    "speakers_detected": speakers
+                },
+                "blob_name": blob_name
+            }
+
+        elif status in ["Failed", "Rejected"]:
+            logging.error(f"❌ Transcription failed with response: {json.dumps(data, indent=2)}")
+            raise Exception(f"Transcription failed: {json.dumps(data)}")
+
+        time.sleep(30)
+        logging.info(f"⏳ Waiting for 30 seconds before next polling attempt...")
 
 @app.activity_trigger(input_name="result_data")
 def write_output_activity(result_data):
@@ -212,15 +302,15 @@ def write_output_activity(result_data):
         logging.error(f"[Activity] Failed to write output: {e}")
         return "ERROR"
 
-@app.function_name(name="start_audio_processing")
-@app.route(route="start-audio-processing", auth_level=func.AuthLevel.FUNCTION)
-@app.durable_client_input(client_name="client")
-def start_audio_processing(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
-    try:
-        data = req.get_json()
-        instance_id = client.start_new("audio_processing_orchestrator", None, data.get("input"))
-        logging.info(f"🎯 Durable orchestration started: {instance_id}")
-        return client.create_check_status_response(req, instance_id)
-    except Exception as e:
-        logging.error(f"❌ Failed to start orchestration via HTTP: {e}")
-        return func.HttpResponse("Error starting orchestration", status_code=500)
+# @app.function_name(name="start_audio_processing")
+# @app.route(route="start-audio-processing", auth_level=func.AuthLevel.FUNCTION)
+# @app.durable_client_input(client_name="client")
+# def start_audio_processing(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
+#     try:
+#         data = req.get_json()
+#         instance_id = client.start_new("audio_processing_orchestrator", None, data.get("input"))
+#         logging.info(f"🎯 Durable orchestration started: {instance_id}")
+#         return client.create_check_status_response(req, instance_id)
+#     except Exception as e:
+#         logging.error(f"❌ Failed to start orchestration via HTTP: {e}")
+#         return func.HttpResponse("Error starting orchestration", status_code=500)
