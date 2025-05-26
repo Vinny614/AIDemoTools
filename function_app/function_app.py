@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 import json
 import traceback
 import requests
-
+import asyncio
+import time
 import azure.functions as func
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
@@ -135,6 +136,7 @@ async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrc
     blob_name = inputblob2.name.replace("audio-in/", "")
     logging.warning(f"Blob name: {blob_name}")
     try:
+        await asyncio.sleep(3)  # Simulate some processing delay
         sas_url = generate_sas_url("audio-in", blob_name)
         logging.warning(f"✅ SAS URL: {sas_url}")
         input_payload = {"sas_url": sas_url, "blob_name": blob_name}
@@ -174,7 +176,7 @@ def start_batch_activity(input_data):
     token = credential.get_token("https://cognitiveservices.azure.com/.default").token
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
     response = requests.post(transcription_url, json=payload, headers=headers)
-    if response.status_code != 202:
+    if response.status_code not in [200, 201, 202]:
         logging.error(f"[Activity] Failed to start transcription: {response.status_code} - {response.text}")
         raise Exception("Batch transcription start failed")
     transcription_location = response.headers["Location"]

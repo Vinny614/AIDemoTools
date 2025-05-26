@@ -21,9 +21,9 @@ This workflow enables automated audio transcription via Azure Speech Services, o
 
 - `start_batch_activity()` sends a `POST` request to:
 
-  ```
+  ```http
   https://<region>.api.cognitive.microsoft.com/speechtotext/v3.1/transcriptions
-  ```
+  ```json
 
 - Payload:
 
@@ -97,14 +97,23 @@ flowchart TD
 
 ## 📁 Example Output
 
-```
 Container: audio-transcript-out/
 File: interview_2025-05-25.json
 Contents: {
   "result": "real-transcript-content",
   "blob_name": "interview_2025-05-25.wav"
 }
-```
+
+'###
+
+Container: audio-transcript-out/
+File: interview_2025-05-25.json
+Contents: {
+  "result": "real-transcript-content",
+  "blob_name": "interview_2025-05-25.wav"
+}
+
+###
 
 ---
 
