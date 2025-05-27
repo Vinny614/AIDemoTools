@@ -372,6 +372,8 @@ def poll_batch_activity(batch_info):
         logging.error(traceback.format_exc())
         return {"error": str(e), "blob_name": batch_info.get("blob_name")}
 
+from azure.core.exceptions import ClientAuthenticationError, ResourceExistsError, HttpResponseError
+
 @app.activity_trigger(input_name="result_data")
 def write_output_activity(result_data):
     logging.info(f"[Activity] Writing result to blob: {result_data}")
@@ -380,7 +382,9 @@ def write_output_activity(result_data):
         storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
         if not storage_account_name:
             raise ValueError("Missing STORAGE_ACCOUNT_NAME")
-        blob_service_client = BlobServiceClient(
+        # Use only the sync BlobServiceClient here
+        from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
+        blob_service_client = SyncBlobServiceClient(
             account_url=f"https://{storage_account_name}.blob.core.windows.net",
             credential=credential
         )
@@ -392,25 +396,16 @@ def write_output_activity(result_data):
         logging.info(f"[Activity] Using storage account: {storage_account_name}")
         logging.info(f"[Activity] AzureWebJobsStorage: {os.getenv('AzureWebJobsStorage')}")
         logging.info(f"[Activity] Full blob URL: {blob_url}")
-        # Optionally, log the current Azure identity
         try:
             logging.info(f"[Activity] Azure identity: {credential.__class__.__name__}")
         except Exception:
             pass
         content = json.dumps(result_data["result"], indent=2)
-        # Touch a file locally for diagnostics
-        try:
-            with open("/tmp/azure_upload_test.txt", "w") as f:
-                f.write(f"Uploading {blob_name} at {datetime.utcnow().isoformat()}Z\n")
-            logging.info("[Activity] Successfully touched /tmp/azure_upload_test.txt")
-        except Exception as e:
-            logging.error(f"[Activity] Failed to touch local file: {e}")
         try:
             output_blob.upload_blob(content, overwrite=True)
             if output_blob.exists():
-                blob_list = output_container.list_blobs()
                 blob_names = []
-                for b in blob_list:
+                for b in output_container.list_blobs():
                     blob_names.append(b.name)
                 logging.info(f"[Activity] Output written to: {container_name}/{blob_name}")
                 logging.info(f"[Activity] Verified blob exists: {blob_url}")
@@ -419,15 +414,17 @@ def write_output_activity(result_data):
             else:
                 logging.error(f"[Activity] Blob upload reported success but blob does NOT exist: {blob_url}")
                 return "ERROR"
+        except ClientAuthenticationError as e:
+            logging.error("[Activity] ClientAuthenticationError: Check managed identity or credentials.")
+            logging.error(f"[Activity] Failed to upload blob: {e}")
+            return "ERROR"
+        except HttpResponseError as e:
+            logging.error(f"[Activity] HttpResponseError: {e.status_code} - {e.message}")
+            logging.error(f"[Activity] Failed to upload blob: {e}")
+            return "ERROR"
         except Exception as e:
             logging.error(f"[Activity] Failed to upload blob: {e}")
-            # Add explicit error for permission/identity issues
-            from azure.core.exceptions import ClientAuthenticationError, ResourceExistsError, HttpResponseError
-            if isinstance(e, ClientAuthenticationError):
-                logging.error("[Activity] ClientAuthenticationError: Check managed identity or credentials.")
-            elif isinstance(e, HttpResponseError):
-                logging.error(f"[Activity] HttpResponseError: {e.status_code} - {e.message}")
-            raise
+            return "ERROR"
     except Exception as e:
         logging.error(f"[Activity] Failed to write output: {e}")
         return "ERROR"
