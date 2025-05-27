@@ -36,7 +36,12 @@ param additionalRoleAssignmentIdentityIds array = []
 param storageAccountName string = 'llmprocstorage'
 
 @description('The name of the default blob storage containers to be created')
-param blobContainerNames array = ['blob-form-to-cosmosdb-blobs', 'content-understanding-blobs']
+param blobContainerNames array = [
+  'blob-form-to-cosmosdb-blobs'
+  'content-understanding-blobs'
+  'audio-in'
+  'audio-transcript-out'
+]
 
 @description('Whether to deploy the CosmosDB resource. This is required if using CosmosDB as an input data source or when writing records to an output CosmosDB container.')
 param deployCosmosDB bool = false
