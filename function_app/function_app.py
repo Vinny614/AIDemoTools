@@ -16,15 +16,13 @@ from src.helpers.azure_function import (
     check_if_env_var_is_set,
 )
 from azure.identity import DefaultAzureCredential
-from azure.core.exceptions import ResourceNotFoundError
 
 load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s:%(levelname)s:%(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+    datefmt="%Y-%m-%d %H:%M:%S",)
 
 _logger = logging.getLogger("azure")
 _logger.setLevel(logging.WARNING)
@@ -409,15 +407,18 @@ def write_output_activity(result_data):
             logging.error(f"[Activity] Failed to touch local file: {e}")
         try:
             output_blob.upload_blob(content, overwrite=True)
-            logging.info(f"[Activity] Output written to: {container_name}/{blob_name}")
             if output_blob.exists():
+                blob_list = output_container.list_blobs()
+                blob_names = []
+                for b in blob_list:
+                    blob_names.append(b.name)
+                logging.info(f"[Activity] Output written to: {container_name}/{blob_name}")
                 logging.info(f"[Activity] Verified blob exists: {blob_url}")
+                logging.info(f"[Activity] Blobs currently in {container_name}: {blob_names}")
+                return "OK"
             else:
                 logging.error(f"[Activity] Blob upload reported success but blob does NOT exist: {blob_url}")
-            # Fix: list_blobs() is synchronous in azure.storage.blob, but if you ever import the async version,
-            # you must use 'await' and 'async for'. Here, ensure you are using the sync BlobServiceClient everywhere.
-            blob_names = [b.name for b in output_container.list_blobs()]
-            logging.info(f"[Activity] Blobs currently in {container_name}: {blob_names}")
+                return "ERROR"
         except Exception as e:
             logging.error(f"[Activity] Failed to upload blob: {e}")
             # Add explicit error for permission/identity issues
@@ -427,7 +428,6 @@ def write_output_activity(result_data):
             elif isinstance(e, HttpResponseError):
                 logging.error(f"[Activity] HttpResponseError: {e.status_code} - {e.message}")
             raise
-        return "OK"
     except Exception as e:
         logging.error(f"[Activity] Failed to write output: {e}")
         return "ERROR"
