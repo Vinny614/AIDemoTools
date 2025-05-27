@@ -214,11 +214,14 @@ def start_batch_activity(input_data):
     storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
     if not storage_account_name:
         raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
-        # Wait for the blob to be fully available
+
+    # ✅ Define the credential BEFORE using it
+    credential = DefaultAzureCredential()
+
+    # ✅ Safe to run now that it's sync context (though aio in sync is a bit sketchy long term)
     if not asyncio.run(wait_for_blob_ready_async(content_url)):
         raise Exception(f"Blob {blob_name} not ready after retries. Aborting transcription.")
 
-    
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
     logging.warning(f"Token obtained for: {token.token[:20]}...")
 
@@ -238,6 +241,9 @@ def start_batch_activity(input_data):
             "timeToLive": "PT1H"
         }
     }
+
+    # You’re good to go from here...
+
 
 
     credential = DefaultAzureCredential()
