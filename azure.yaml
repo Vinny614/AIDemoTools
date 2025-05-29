@@ -37,6 +37,8 @@ services:
     project: ./function_app/
     language: python
     host: function
+    docker:
+      path: ../Dockerfile
     hooks:
       prepackage: 
         # Temporarily copy the requirements.txt to the function app directory so that it is packaged with the function app
