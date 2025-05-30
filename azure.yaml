@@ -39,6 +39,7 @@ services:
     host: function
     docker:
       path: ../Dockerfile
+      image: llmpacr01.azurecr.io/functionapp-image:latest
     hooks:
       prepackage: 
         # Temporarily copy the requirements.txt to the function app directory so that it is packaged with the function app

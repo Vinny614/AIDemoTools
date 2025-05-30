@@ -16,6 +16,8 @@ from src.helpers.azure_function import (
     check_if_env_var_is_set,
 )
 from azure.identity import DefaultAzureCredential
+import subprocess
+import tempfile
 
 load_dotenv()
 
@@ -106,14 +108,14 @@ if IS_STORAGE_ACCOUNT_AVAILABLE and IS_COSMOSDB_AVAILABLE and IS_AOAI_DEPLOYED a
 import aiohttp
 from azure.storage.blob.aio import BlobServiceClient
 
-async def wait_for_blob_ready_async(blob_url, max_retries=6, delay=5):
+async def wait_for_blob_ready_async(blob_url, container_name, max_retries=6, delay=5):
     try:
         credential = DefaultAzureCredential()
         blob_service_client = BlobServiceClient(
             account_url=f"https://{os.getenv('STORAGE_ACCOUNT_NAME')}.blob.core.windows.net",
             credential=credential
         )
-        container_client = blob_service_client.get_container_client("audio-in")
+        container_client = blob_service_client.get_container_client(container_name)
         blob_name = blob_url.split("/")[-1]
         blob_client = container_client.get_blob_client(blob_name)
 
@@ -127,11 +129,11 @@ async def wait_for_blob_ready_async(blob_url, max_retries=6, delay=5):
         await blob_service_client.close()
         return False
     except Exception as e:
-        logging.error(f"❌ Error checking blob readiness: {e}")
+        logging.error(f"❌ Error checking blob readiness in {container_name}: {e}")
         return False
 
 
-def is_blob_ready_sync(blob_url, max_retries=6, delay=5):
+def is_blob_ready_sync(blob_url, container_name, max_retries=6, delay=5):
     try:
         credential = DefaultAzureCredential()
         from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
@@ -140,7 +142,7 @@ def is_blob_ready_sync(blob_url, max_retries=6, delay=5):
             account_url=f"https://{storage_account_name}.blob.core.windows.net",
             credential=credential
         )
-        container_client = blob_service_client.get_container_client("audio-in")
+        container_client = blob_service_client.get_container_client(container_name)
         blob_name = blob_url.split("/")[-1]
         blob_client = container_client.get_blob_client(blob_name)
         for _ in range(max_retries):
@@ -150,7 +152,7 @@ def is_blob_ready_sync(blob_url, max_retries=6, delay=5):
             time.sleep(delay)
         return False
     except Exception as e:
-        logging.error(f"❌ Error checking blob readiness (sync): {e}")
+        logging.error(f"❌ Error checking blob readiness (sync) in {container_name}: {e}")
         return False
 
 
@@ -162,36 +164,38 @@ def is_blob_ready_sync(blob_url, max_retries=6, delay=5):
     path="audio-in/{name}",
     connection="AzureWebJobsStorage",
 )
-@app.durable_client_input(client_name="client")
-async def audio_blob_trigger(inputblob2: func.InputStream, client: df.DurableOrchestrationClient):
+async def audio_blob_trigger(inputblob2: func.InputStream):
     logging.warning("🔥 Blob trigger fired!")
-    
     blob_name = inputblob2.name.replace("audio-in/", "")
     logging.warning(f"Blob name: {blob_name}")
 
     try:
         await asyncio.sleep(7)  # Simulate some processing delay
-
         storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
         if not storage_account_name:
             raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
-
         content_url = f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
         logging.warning(f"✅ Recordings URL: {content_url}")
-
-        # 🔍 NEW: Wait until blob is actually ready before triggering orchestration
-        if not await wait_for_blob_ready_async(content_url):
-            logging.error("❌ Blob not ready after retries. Skipping orchestration.")
+        # Wait until blob is actually ready before processing in audio-in
+        if not await wait_for_blob_ready_async(content_url, "audio-in"):
+            logging.error("❌ Blob not ready after retries. Skipping processing.")
             return
-
-        input_payload = {
-            "content_url": content_url,
-            "blob_name": blob_name
-        }
-
-        instance_id = await client.start_new("audio_processing_orchestrator", None, input_payload)
-        logging.info(f"🎯 Orchestration started: {instance_id}")
-
+        # Convert to mono and upload to audio-preprocessed
+        mono_url = await process_and_upload_mono_blob(
+            blob_url=content_url,
+            storage_account_name=storage_account_name,
+            source_container="audio-in",
+            dest_container="audio-preprocessed"
+        )
+        if not mono_url:
+            logging.error(f"❌ Mono conversion/upload failed for {blob_name}")
+            return
+        logging.info(f"🎵 Mono file available at: {mono_url}")
+        # Wait until mono file is ready in audio-preprocessed (optional, for further logic)
+        if not await wait_for_blob_ready_async(mono_url, "audio-preprocessed"):
+            logging.error("❌ Mono blob not ready after upload. Skipping further processing.")
+            return
+        # Optionally, trigger further processing/orchestration here if needed
     except Exception as e:
         logging.error(f"❌ Error in blob trigger: {e}")
         logging.error(traceback.format_exc())
@@ -244,7 +248,7 @@ def start_batch_activity(input_data):
     credential = DefaultAzureCredential()
 
     # Use sync blob readiness check to avoid asyncio issues in activity context
-    if not is_blob_ready_sync(content_url):
+    if not is_blob_ready_sync(content_url, "audio-in"):
         raise Exception(f"Blob {blob_name} not ready after retries. Aborting transcription.")
 
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
@@ -428,4 +432,76 @@ def write_output_activity(result_data):
     except Exception as e:
         logging.error(f"[Activity] Failed to write output: {e}")
         return "ERROR"
+
+
+def convert_stereo_to_mono_ffmpeg(input_path, output_path):
+    """
+    Converts a stereo audio file to mono using ffmpeg.
+    Args:
+        input_path (str): Path to the input stereo audio file.
+        output_path (str): Path to save the output mono audio file.
+    Returns:
+        bool: True if conversion succeeded, False otherwise.
+    """
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",  # Overwrite output file if exists
+            "-i", input_path,
+            "-ac", "1",
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            logging.info(f"[FFMPEG] Converted {input_path} to mono at {output_path}")
+            return True
+        else:
+            logging.error(f"[FFMPEG] Error: {result.stderr}")
+            return False
+    except Exception as e:
+        logging.error(f"[FFMPEG] Exception: {e}")
+        return False
+
+
+async def process_and_upload_mono_blob(blob_url, storage_account_name, source_container="audio-in", dest_container="audio-in-mono"):
+    """
+    Downloads a blob, converts it to mono, and uploads to another container.
+    Args:
+        blob_url (str): URL of the source blob.
+        storage_account_name (str): Storage account name.
+        source_container (str): Source container name.
+        dest_container (str): Destination container name.
+    Returns:
+        str: URL of the uploaded mono file, or None on failure.
+    """
+    try:
+        credential = DefaultAzureCredential()
+        from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
+        blob_service_client = SyncBlobServiceClient(
+            account_url=f"https://{storage_account_name}.blob.core.windows.net",
+            credential=credential
+        )
+        container_client = blob_service_client.get_container_client(source_container)
+        blob_name = blob_url.split("/")[-1]
+        blob_client = container_client.get_blob_client(blob_name)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_input = os.path.join(tmpdir, blob_name)
+            with open(local_input, "wb") as f:
+                f.write(blob_client.download_blob().readall())
+            local_output = os.path.join(tmpdir, f"mono_{blob_name}")
+            if not convert_stereo_to_mono_ffmpeg(local_input, local_output):
+                logging.error(f"[ProcessMono] Conversion failed for {blob_name}")
+                return None
+            # Upload to destination container
+            dest_container_client = blob_service_client.get_container_client(dest_container)
+            dest_blob_client = dest_container_client.get_blob_client(f"mono_{blob_name}")
+            with open(local_output, "rb") as f:
+                dest_blob_client.upload_blob(f, overwrite=True)
+            mono_url = dest_blob_client.url
+            logging.info(f"[ProcessMono] Uploaded mono file to {mono_url}")
+            return mono_url
+    except Exception as e:
+        logging.error(f"[ProcessMono] Exception: {e}")
+        return None
 
