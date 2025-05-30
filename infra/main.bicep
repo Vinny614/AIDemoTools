@@ -1995,13 +1995,13 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = if (deployWebApp) {
         webAppAllowPublicAccess && empty(webAppAllowedExternalIpRanges)
           ? [
               {
-                ipAddress: '0.0.0.0/0'
+                ipAddress: '0.0.0.0'
                 action: 'Allow'
                 priority: 2147483647
                 name: 'Allow all'
               }
             ]
-          : []
+ : []
       )
     }
   }
@@ -2143,3 +2143,4 @@ output SPEECH_ENDPOINT string = deploySpeechResource ? speech.properties.endpoin
 output LANGUAGE_ENDPOINT string = deployLanguageResource
   ? 'https://${languageTokenName}.cognitiveservices.azure.com/'
   : ''
+output audiomonoFunctionAppUrl string = audiomonoFunctionApp.properties.defaultHostName
