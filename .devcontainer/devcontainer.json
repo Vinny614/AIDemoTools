@@ -1,6 +1,6 @@
 {
   "name": "Korin Dev Env",
-  "image": "korin/dev-env:dev",
+  "image": "updated-devcontainer:latest",
   "remoteUser": "vscode",
   "workspaceFolder": "/workspace",
   "mounts": [

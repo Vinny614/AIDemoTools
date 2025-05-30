@@ -43,6 +43,35 @@ param blobContainerNames array = [
   'audio-transcript-out'
 ]
 
+@description('The name of the Azure Container Registry')
+param acrName string = 'llmpacr01'
+
+resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
+  name: acrName
+  location: location
+  sku: {
+    name: 'Premium'
+  }
+  properties: {
+    adminUserEnabled: false
+    publicNetworkAccess: 'Enabled'
+    networkRuleSet: {
+      defaultAction: 'Allow'
+    }
+  }
+  // Ensure ACR is always created before any resource that depends on it
+}
+
+// Fix for BCP120: Use a uniqueString-based GUID for the role assignment name
+resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
+  name: guid(acr.id, 'acrpull', functionApp.name)
+  scope: acr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
 @description('Whether to deploy the CosmosDB resource. This is required if using CosmosDB as an input data source or when writing records to an output CosmosDB container.')
 param deployCosmosDB bool = false
 
