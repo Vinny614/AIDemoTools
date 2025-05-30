@@ -149,111 +149,65 @@ def normalize_llm_response(raw_json: dict) -> dict:
         if isinstance(event.get("witness_description"), list):
             event["witness_description"] = "; ".join(map(str, event["witness_description"]))
 
+        if not raw_json.get("times"):
+        raw_json["times"] = list(raw_json.get("time_event_map", {}).keys())
+
     return raw_json
 
-LLM_INVESTIGATION_PROMPT = "You are a digital case analyst reviewing a police report. [...]"
+LLM_INVESTIGATION_PROMPT = (
+    "Return a valid JSON object that matches this schema. "
+    "You are a digital case analyst reviewing a police report.
 
-@bp_doc_intel_extract_city_names.route(route=FUNCTION_ROUTE)
-def doc_intel_extract_city_names(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info(f"Python HTTP trigger function `{FUNCTION_ROUTE}` received a request.")
-    output_model = FunctionResponseModel(success=False)
+"
+    "Return a structured JSON object that follows this schema and captures key information and relationships.
 
-    try:
-        error_text = "An error occurred during processing."
-        error_code = 422
-        func_timer = MeasureRunTime()
-        func_timer.start()
+"
+    "Flat fields:
+"
+    "- people: List all individuals mentioned in the report.
+"
+    "- roles: Map each person's name to their role (e.g., 'Daniel Smith': 'suspect').
+"
+    "- relationships: Describe how individuals are connected (e.g., 'X is married to Y', 'X is solicitor for Y').
+"
+    "- locations: Include addresses, cities, or institutions.
+"
+    "- events: Major incidents (e.g., robbery, assault).
+"
+    "- vehicles: Each entry must be an object with keys 'description', 'reg_number', and optionally 'owner'.
+"
+    "- weapons: Descriptions of any weapons or offensive items.
+"
+    "- descriptions: A list of clothing or physical descriptions as plain strings.
+"
+    "- contact_info: Phone numbers, emails, etc.
+"
+    "- time_event_map: A dictionary mapping each timestamp to what happened.
+"
+    "- summary: A brief, readable summary of the incident.
 
-        mime_type = req.headers.get("Content-Type")
-        if mime_type not in VALID_DI_PREBUILT_READ_LAYOUT_MIME_TYPES:
-            return func.HttpResponse(
-                f"This function only supports a Content-Type of {', '.join(VALID_DI_PREBUILT_READ_LAYOUT_MIME_TYPES)}. Supplied file is of type {mime_type}",
-                status_code=422,
-            )
+"
+    "Structured fields:
+"
+    "- structured_people: Each object must have name, role, affiliations, vehicles (as objects), contact_info, and locations.
+"
+    "- structured_events: Each object must include type, datetime, location, suspects, officers, vehicles (as objects), and witness_description (as a single string).
 
-        req_body = req.get_body()
-        if len(req_body) == 0:
-            return func.HttpResponse("Please provide a base64 encoded PDF in the request body.", status_code=422)
-
-        error_text = "An error occurred during image extraction."
-        doc_page_imgs = load_visual_obj_bytes_to_pil_imgs_dict(req_body, mime_type, starting_idx=1, pdf_img_dpi=100)
-
-        error_text = "An error occurred during Document Intelligence extraction."
-        with MeasureRunTime() as di_timer:
-            poller = di_client.begin_analyze_document(
-                model_id=DOC_INTEL_MODEL_ID,
-                analyze_request=AnalyzeDocumentRequest(bytes_source=req_body),
-            )
-            di_result = poller.result()
-            output_model.di_raw_response = di_result.as_dict()
-            processed_content_docs = doc_intel_result_processor.process_analyze_result(
-                analyze_result=di_result,
-                doc_page_imgs=doc_page_imgs,
-                on_error="raise",
-            )
-            merged_processed_content_docs = doc_intel_result_processor.merge_adjacent_text_content_docs(processed_content_docs)
-
-        output_model.di_extracted_text = "\n".join(doc.content for doc in merged_processed_content_docs if doc.content)
-        output_model.di_time_taken_secs = di_timer.time_taken
-
-        content_openai_message = convert_processed_di_docs_to_openai_message(merged_processed_content_docs, role="user")
-        input_messages = [
-            {"role": "system", "content": LLM_INVESTIGATION_PROMPT},
-            content_openai_message,
-        ]
-        output_model.llm_input_messages = input_messages
-
-        error_text = "An error occurred when sending the LLM request."
-        with MeasureRunTime() as llm_timer:
-            for attempt in range(MAX_LLM_RETRIES):
-                try:
-                    llm_result = aoai_client.chat.completions.create(
-                        messages=input_messages,
-                        model=AOAI_LLM_DEPLOYMENT,
-                        response_format={"type": "json_object"},
-                    )
-                    break
-                except RateLimitError:
-                    if attempt == MAX_LLM_RETRIES - 1:
-                        raise
-                    wait_time = (2 ** attempt) + random.uniform(0, 1)
-                    logging.warning(f"Rate limited. Retrying in {wait_time:.2f} seconds...")
-                    time.sleep(wait_time)
-
-        output_model.llm_time_taken_secs = llm_timer.time_taken
-
-        message = llm_result.choices[0].message
-        if not message or not message.content:
-            raise ValueError("LLM returned empty or missing message content.")
-
-        output_model.llm_reply_message = llm_result.choices[0].to_dict()
-        output_model.llm_raw_response = message.content
-
-        raw_json = json.loads(message.content)
-        try:
-            llm_structured_response = LLMInvestigationExtractionModel(**raw_json)
-        except ValidationError:
-            logging.warning("Validation failed. Normalizing response and retrying parse.")
-            raw_json = normalize_llm_response(raw_json)
-            llm_structured_response = LLMInvestigationExtractionModel(**raw_json)
-
-        output_model.result = llm_structured_response
-        output_model.success = True
-        output_model.func_time_taken_secs = func_timer.stop()
-
-        return func.HttpResponse(
-            body=output_model.model_dump_json(),
-            mimetype="application/json",
-            status_code=200,
-        )
-
-    except Exception as _e:
-        output_model.success = False
-        output_model.error_text = error_text
-        output_model.func_time_taken_secs = func_timer.stop()
-        logging.exception(output_model.error_text)
-        return func.HttpResponse(
-            body=output_model.model_dump_json(),
-            mimetype="application/json",
-            status_code=error_code,
-        )
+"
+    "Guidelines:
+"
+    "- Use exact field names from this schema.
+"
+    "- Do not rename keys (e.g., do not use 'vehicles_involved' instead of 'vehicles').
+"
+    "- Ensure relationships is a list of strings.
+"
+    "- Ensure descriptions are a list of plain strings, not objects.
+"
+    "- witness_description must be a single string.
+"
+    "- Output must be valid JSON matching this structure.
+"
+    "- Ensure contact_info is a list of plain strings, (never a dictionary or object).
+"
+)
