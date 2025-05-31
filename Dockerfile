@@ -1,11 +1,18 @@
-FROM mcr.microsoft.com/azure-functions/python:4-python3.12
+FROM python:3.11-slim
 
 # Install ffmpeg
 RUN apt-get update && apt-get install -y ffmpeg
 
-# Copy function app code into the container
-COPY function_app/ /home/site/wwwroot
+# Set working directory
+WORKDIR /app
 
-# Optional: install Python dependencies
-COPY requirements.txt /home/site/wwwroot
-RUN pip install -r /home/site/wwwroot/requirements.txt
+# Copy app files
+COPY function_app/ .  
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Start FastAPI via uvicorn
+CMD ["uvicorn", "audiomono_main:app", "--host", "0.0.0.0", "--port", "80"]
+

@@ -62,13 +62,13 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
   // Ensure ACR is always created before any resource that depends on it
 }
 
-// Fix for BCP120: Use a uniqueString-based GUID for the role assignment name
+// Assign the function app's managed identity ACR pull permissions
 resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
-  name: guid(acr.id, 'acrpull', functionApp.name)
+  name: guid(acr.id, 'acrpull', audiomonoWebApp.name)
   scope: acr
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
-    principalId: functionApp.identity.principalId
+    principalId: audiomonoWebApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }
@@ -928,11 +928,11 @@ var cosmosDbNetworkingProperties = (storageServicesAndKVAllowPublicAccess && emp
         ? [
             {
               id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppSubnetName)
-              ignoreMissingVNetServiceEndpoint: false
+              ignoreMissingVnetServiceEndpoint: false
             }
             {
               id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, functionAppSubnetName)
-              ignoreMissingVNetServiceEndpoint: false
+              ignoreMissingVnetServiceEndpoint: false
             }
           ]
         : []
@@ -1627,18 +1627,7 @@ resource keyVaultAccessPolicies 'Microsoft.KeyVault/vaults/accessPolicies@2023-0
   parent: keyVault
   name: 'add'
   properties: {
-    accessPolicies: deployWebApp
-      ? [
-          {
-            tenantId: subscription().tenantId
-            objectId: webApp.identity.principalId
-            permissions: {
-              keys: ['get', 'list']
-              secrets: ['get', 'list']
-            }
-          }
-        ]
-      : []
+    accessPolicies: []
   }
 }
 
@@ -1679,6 +1668,175 @@ resource functionAppPlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   sku: functionAppSkuProperties
   kind: 'linux'
 }
+
+// Demo app
+resource webAppPlan 'Microsoft.Web/serverfarms@2024-04-01' = if (deployWebApp) {
+  name: webAppPlanTokenName
+  location: location
+  tags: tags
+  properties: {
+    reserved: true
+  }
+  sku: {
+    name: 'P0v3'
+    tier: 'Premium0V3'
+    size: 'P0v3'
+    family: 'Pv3'
+    capacity: 1
+  }
+  kind: 'linux'
+  dependsOn: [functionAppPlan] // Consumption plan must be deployed before premium plan
+}
+
+// Populate environment variables for the demo app for backend services,
+// only including values for resources & endpoints that are deployed 
+var optionalDeploymentWebAppEnvVars = deployCosmosDB
+  ? {
+      COSMOSDB_ACCOUNT_ENDPOINT: cosmosDbAccount.properties.documentEndpoint
+      COSMOSDB_DATABASE_NAME: cosmosDbDatabaseName
+    }
+  : {}
+
+resource webApp 'Microsoft.Web/sites@2024-04-01' = if (deployWebApp) {
+  name: webAppTokenName
+  location: location
+  tags: union(tags, { 'azd-service-name': webAppServiceName })
+  kind: 'app,linux'
+  properties: {
+    publicNetworkAccess: webAppAllowPublicAccess ? 'Enabled' : 'Disabled'
+    clientAffinityEnabled: true // If app plan capacity > 1, set this to True to ensure gradio works correctly.
+    serverFarmId: webAppPlan.id
+    httpsOnly: true
+    siteConfig: {
+      alwaysOn: true
+      linuxFxVersion: 'python|3.11'
+      ftpsState: 'Disabled'
+      appCommandLine: 'python demo_app.py'
+      minTlsVersion: '1.2'
+      scmIpSecurityRestrictionsDefaultAction: 'Deny'
+      scmIpSecurityRestrictionsUseMain: true // Use same IP restrictions for the SCM deployment site as the main site
+      ipSecurityRestrictionsDefaultAction: 'Deny'
+      ipSecurityRestrictions: concat(
+        [
+          {
+            vnetSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppSubnetName)
+            action: 'Allow'
+            priority: 100
+            name: 'Allow web app subnet'
+          }
+        ],
+        webAppAllowPublicAccess && !empty(webAppAllowedExternalIpRanges)
+          ? concat(
+              map(range(0, length(webAppAllowedExternalIpRanges)), i => {
+                ipAddress: webAppAllowedExternalIpRanges[i]
+                action: 'Allow'
+                priority: 200 + i
+                name: 'External access ${i + 1}'
+              }),
+              [
+                {
+                  ipAddress: '0.0.0.0/0'
+                  action: 'Deny'
+                  priority: 2147483647
+                  name: 'Deny all'
+                }
+              ]
+            )
+          : [],
+        webAppAllowPublicAccess && empty(webAppAllowedExternalIpRanges)
+          ? [
+              {
+                ipAddress: '0.0.0.0/0'
+                action: 'Allow'
+                priority: 2147483647
+                name: 'Allow all'
+              }
+            ]
+          : []
+      )
+    }
+  }
+  identity: {
+    type: 'SystemAssigned'
+  }
+
+  resource appSettings 'config@2024-04-01' = {
+    name: 'appsettings'
+    properties: union(optionalDeploymentWebAppEnvVars, {
+      SCM_DO_BUILD_DURING_DEPLOYMENT: '1'
+      FUNCTION_HOSTNAME: 'https://${functionApp.properties.defaultHostName}'
+      FUNCTION_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=${funcAppKeyKvSecretName})'
+      STORAGE_ACCOUNT_ENDPOINT: storageAccount.properties.primaryEndpoints.blob
+      WEB_APP_USE_PASSWORD_AUTH: string(webAppUsePasswordAuth)
+      WEB_APP_USERNAME: webAppUsername // Demo app username, no need for key vault storage
+      WEB_APP_PASSWORD: webAppPassword // Demo app password, no need for key vault storage
+      WEBSITE_VNET_ROUTE_ALL: '1' // Force all traffic through VNET
+    })
+  }
+}
+
+resource privateEndpointWebApp 'Microsoft.Network/privateEndpoints@2024-05-01' = if (webAppUsePrivateEndpoint) {
+  name: '${webApp.name}-private-endpoint'
+  location: location
+  properties: {
+    subnet: {
+      id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppPrivateEndpointSubnetName)
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'MyFunctionAppPrivateLinkConnection'
+        properties: {
+          privateLinkServiceId: webApp.id
+          groupIds: [
+            'sites'
+          ]
+        }
+      }
+    ]
+  }
+
+  resource WebAppPrivateDnsZoneGroup 'privateDnsZoneGroups@2024-05-01' = if (webAppUsePrivateEndpoint) {
+    name: 'webAppPrivateDnsZoneGroup'
+    properties: {
+      privateDnsZoneConfigs: [
+        {
+          name: 'config'
+          properties: {
+            privateDnsZoneId: privateAppDnsZone.id
+          }
+        }
+      ]
+    }
+  }
+}
+
+// Create VNET integration
+resource webAppVirtualNetwork 'Microsoft.Web/sites/networkConfig@2024-04-01' = {
+  parent: webApp
+  name: 'virtualNetwork'
+  properties: {
+    subnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppSubnetName)
+    swiftSupported: true
+  }
+}
+
+// Role assignments for the Web App's managed identity
+
+// Add blob storage contributor role to web app (for uploading input data and triggering the function app)
+resource webAppBlobContainerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for containerName in blobContainerNames: {
+    name: guid(storageAccount.id, containerName, 'WebAppBlobContainerRoleAssignment')
+    scope: blobStorageContainer[indexOf(blobContainerNames, containerName)]
+    properties: {
+      roleDefinitionId: subscriptionResourceId(
+        'Microsoft.Authorization/roleDefinitions',
+        roleDefinitions.storageBlobDataContributor
+      )
+      principalId: webApp.identity.principalId
+      principalType: 'ServicePrincipal' // <-- Add this line
+    }
+  }
+]
 
 // Populate environment variables for the function app for backend services,
 // only including values for resources & endpoints that are deployed 
@@ -1761,7 +1919,6 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
       scmIpSecurityRestrictionsUseMain: true // Use same IP restrictions for the SCM deployment site as the main site
       ipSecurityRestrictions: concat(
-        // Allow access from the web app subnet when using service endpoints
         [
           {
             vnetSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppSubnetName)
@@ -1770,11 +1927,10 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
             name: 'Allow web app subnet'
           }
         ],
-        // If: public network access is allowed and IPs are specified, Add IP rules and deny all other traffic
-        functionAppAllowPublicAccess && !empty(functionAppAllowedExternalIpRanges)
+        webAppAllowPublicAccess && !empty(webAppAllowedExternalIpRanges)
           ? concat(
-              map(range(0, length(functionAppAllowedExternalIpRanges)), i => {
-                ipAddress: functionAppAllowedExternalIpRanges[i]
+              map(range(0, length(webAppAllowedExternalIpRanges)), i => {
+                ipAddress: webAppAllowedExternalIpRanges[i]
                 action: 'Allow'
                 priority: 200 + i
                 name: 'External access ${i + 1}'
@@ -1789,8 +1945,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
               ]
             )
           : [],
-        // OR: If public network access is allowed and no IPs are specified, allow all traffic
-        functionAppAllowPublicAccess && empty(functionAppAllowedExternalIpRanges)
+        webAppAllowPublicAccess && empty(webAppAllowedExternalIpRanges)
           ? [
               {
                 ipAddress: '0.0.0.0/0'
@@ -1915,64 +2070,39 @@ module functionAppCosmosDbRoleAssignment 'cosmosdb-account-role-assignment.bicep
   }
 }
 
-// Demo app
-resource webAppPlan 'Microsoft.Web/serverfarms@2024-04-01' = if (deployWebApp) {
-  name: webAppPlanTokenName
-  location: location
-  tags: tags
-  properties: {
-    reserved: true
-  }
-  sku: {
-    name: 'P0v3'
-    tier: 'Premium0V3'
-    size: 'P0v3'
-    family: 'Pv3'
-    capacity: 1
-  }
-  kind: 'linux'
-  dependsOn: [functionAppPlan] // Consumption plan must be deployed before premium plan
-}
+// 1. Define audiomonoFunctionApp first
+@description('The container image to use for the audiomono function app')
+param audiomonoContainerImage string = 'llmpacr01.azurecr.io/functionapp-image:latest'
 
-// Populate environment variables for the demo app for backend services,
-// only including values for resources & endpoints that are deployed 
-var optionalDeploymentWebAppEnvVars = deployCosmosDB
-  ? {
-      COSMOSDB_ACCOUNT_ENDPOINT: cosmosDbAccount.properties.documentEndpoint
-      COSMOSDB_DATABASE_NAME: cosmosDbDatabaseName
-    }
-  : {}
-
-resource webApp 'Microsoft.Web/sites@2024-04-01' = if (deployWebApp) {
-  name: webAppTokenName
+resource audiomonoWebApp 'Microsoft.Web/sites@2024-04-01' = {
+  name: 'audiomono-${resourceToken}'
   location: location
-  tags: union(tags, { 'azd-service-name': webAppServiceName })
-  kind: 'app,linux'
+  kind: 'app,linux,container'
+  tags: union(tags, { 'azd-service-name': 'audiomono' })
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
-    publicNetworkAccess: webAppAllowPublicAccess ? 'Enabled' : 'Disabled'
-    clientAffinityEnabled: true // If app plan capacity > 1, set this to True to ensure gradio works correctly.
-    serverFarmId: webAppPlan.id
     httpsOnly: true
+    publicNetworkAccess: functionAppAllowPublicAccess ? 'Enabled' : 'Disabled'
+    serverFarmId: functionAppPlan.id
     siteConfig: {
       alwaysOn: true
-      linuxFxVersion: 'python|3.11'
+      linuxFxVersion: 'DOCKER|${audiomonoContainerImage}'
       ftpsState: 'Disabled'
-      appCommandLine: 'python demo_app.py'
       minTlsVersion: '1.2'
-      scmIpSecurityRestrictionsDefaultAction: 'Deny'
-      scmIpSecurityRestrictionsUseMain: true // Use same IP restrictions for the SCM deployment site as the main site
       ipSecurityRestrictionsDefaultAction: 'Deny'
+      scmIpSecurityRestrictionsDefaultAction: 'Deny'
+      scmIpSecurityRestrictionsUseMain: true
       ipSecurityRestrictions: concat(
-        // Allow access from the web app subnet
         [
           {
-            vnetSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppSubnetName)
+            vnetSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, functionAppSubnetName)
             action: 'Allow'
             priority: 100
             name: 'Allow web app subnet'
           }
         ],
-        // If: public network access is allowed and IPs are specified, Add IP rules and deny all other traffic
         webAppAllowPublicAccess && !empty(webAppAllowedExternalIpRanges)
           ? concat(
               map(range(0, length(webAppAllowedExternalIpRanges)), i => {
@@ -1991,141 +2121,83 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = if (deployWebApp) {
               ]
             )
           : [],
-        // OR: If public network access is allowed and no IPs are specified, allow all traffic
         webAppAllowPublicAccess && empty(webAppAllowedExternalIpRanges)
           ? [
               {
-                ipAddress: '0.0.0.0'
+                ipAddress: '0.0.0.0/0'
                 action: 'Allow'
                 priority: 2147483647
                 name: 'Allow all'
               }
             ]
- : []
+          : []
       )
-    }
-  }
-  identity: {
-    type: 'SystemAssigned'
-  }
-
-  resource appSettings 'config@2024-04-01' = {
-    name: 'appsettings'
-    properties: union(optionalDeploymentWebAppEnvVars, {
-      SCM_DO_BUILD_DURING_DEPLOYMENT: '1'
-      FUNCTION_HOSTNAME: 'https://${functionApp.properties.defaultHostName}'
-      FUNCTION_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=${funcAppKeyKvSecretName})'
-      STORAGE_ACCOUNT_ENDPOINT: storageAccount.properties.primaryEndpoints.blob
-      WEB_APP_USE_PASSWORD_AUTH: string(webAppUsePasswordAuth)
-      WEB_APP_USERNAME: webAppUsername // Demo app username, no need for key vault storage
-      WEB_APP_PASSWORD: webAppPassword // Demo app password, no need for key vault storage
-      WEBSITE_VNET_ROUTE_ALL: '1' // Force all traffic through VNET
-    })
-  }
-}
-
-resource privateEndpointWebApp 'Microsoft.Network/privateEndpoints@2024-05-01' = if (webAppUsePrivateEndpoint) {
-  name: '${webApp.name}-private-endpoint'
-  location: location
-  properties: {
-    subnet: {
-      id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppPrivateEndpointSubnetName)
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'MyFunctionAppPrivateLinkConnection'
-        properties: {
-          privateLinkServiceId: webApp.id
-          groupIds: [
-            'sites'
-          ]
-        }
-      }
-    ]
-  }
-
-  resource WebAppPrivateDnsZoneGroup 'privateDnsZoneGroups@2024-05-01' = if (webAppUsePrivateEndpoint) {
-    name: 'webAppPrivateDnsZoneGroup'
-    properties: {
-      privateDnsZoneConfigs: [
+      appSettings: [
         {
-          name: 'config'
-          properties: {
-            privateDnsZoneId: privateAppDnsZone.id
-          }
+          name: 'WEBSITES_PORT'
+          value: '80'
+        }
+        {
+          name: 'AUDIOMONO_ENDPOINT'
+          value: 'https://audiomono-${resourceToken}.azurewebsites.net'
+        }
+        {
+          name: 'AzureWebJobsStorage__credential'
+          value: 'managedIdentity'
+        }
+        {
+          name: 'AzureWebJobsStorage__serviceUri'
+          value: storageAccountBlobUri
+        }
+        {
+          name: 'STORAGE_ACCOUNT_NAME'
+          value: storageAccount.name
+        }
+        {
+          name: 'FUNCTION_HOSTNAME'
+          value: 'https://${functionApp.properties.defaultHostName}'
+        }
+        {
+          name: 'FUNCTION_KEY'
+          value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=${funcAppKeyKvSecretName})'
         }
       ]
     }
   }
 }
 
-// Create VNET integration
-resource webAppVirtualNetwork 'Microsoft.Web/sites/networkConfig@2024-04-01' = {
-  parent: webApp
+resource audiomonoWebAppVirtualNetwork 'Microsoft.Web/sites/networkConfig@2024-04-01' = {
+  parent: audiomonoWebApp
   name: 'virtualNetwork'
   properties: {
-    subnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppSubnetName)
+    subnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, functionAppSubnetName)
     swiftSupported: true
   }
 }
 
-// Role assignments for the Web App's managed identity
-
-// Add blob storage contributor role to web app (for uploading input data and triggering the function app)
-resource webAppBlobContainerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
-  for containerName in blobContainerNames: {
-    name: guid(storageAccount.id, containerName, 'WebAppBlobContainerRoleAssignment')
-    scope: blobStorageContainer[indexOf(blobContainerNames, containerName)]
-    properties: {
-      roleDefinitionId: subscriptionResourceId(
-        'Microsoft.Authorization/roleDefinitions',
-        roleDefinitions.storageBlobDataContributor
-      )
-      principalId: webApp.identity.principalId
-      principalType: 'ServicePrincipal' // <-- Add this line
-    }
-  }
-]
-
-// Add CosmosDB data reader role to web app (for reading output data - e.g. processed documents)
-module webAppCosmosDbRoleAssignment 'cosmosdb-account-role-assignment.bicep' = if (deployWebApp && deployCosmosDB) {
-  name: 'webAppCosmosDbReaderRoleAssignment'
+module audiomonoWebAppStorageRoleAssignments 'storage-account-role-assignment.bicep' = {
+  name: 'audiomonoWebAppStorageRoleAssignments'
   scope: resourceGroup()
   params: {
-    accountName: cosmosDbAccount.name
-    principalId: webApp.identity.principalId
-    roleDefinitionId: cosmosDbDataReaderRoleDefinition.id
+    storageAccountName: storageAccount.name
+    principalId: audiomonoWebApp.identity.principalId
+    roleDefintionIds: storageRoleDefinitionIds
   }
 }
 
-// Role assignments for additional identities (e.g. for local development)
-module additionalIdentityStorageRoleAssignments 'storage-account-role-assignment.bicep' = [
-  for additionalRoleAssignmentIdentityId in additionalRoleAssignmentIdentityIds: {
-    name: guid(storageAccount.id, additionalRoleAssignmentIdentityId, 'StorageRoleAssignment')
-    scope: resourceGroup()
-    params: {
-      storageAccountName: storageAccount.name
-      principalId: additionalRoleAssignmentIdentityId
-      roleDefintionIds: storageRoleDefinitionIds
-    }
+module audiomonoWebAppCosmosDbRoleAssignment 'cosmosdb-account-role-assignment.bicep' = if (deployCosmosDB) {
+  name: 'audiomonoWebAppCosmosDbRoleAssignment'
+  scope: resourceGroup()
+  params: {
+    accountName: cosmosDbAccount.name
+    principalId: audiomonoWebApp.identity.principalId
+    roleDefinitionId: cosmosDbDataContributorRoleDefinition.id
   }
-]
-module additionalIdentityCosmosDbRoleAssignment 'cosmosdb-account-role-assignment.bicep' = [
-  for additionalRoleAssignmentIdentityId in additionalRoleAssignmentIdentityIds: if (deployCosmosDB) {
-    name: guid(cosmosDbAccount.id, additionalRoleAssignmentIdentityId, 'CosmosDbRoleAssignment')
-    scope: resourceGroup()
-    params: {
-      accountName: cosmosDbAccount.name
-      principalId: additionalRoleAssignmentIdentityId
-      roleDefinitionId: cosmosDbDataContributorRoleDefinition.id
-    }
-  }
-]
+}
 
-// Add Language endpoint to outputs
-output FunctionAppUrl string = functionApp.properties.defaultHostName
-output webAppUrl string = deployWebApp ? webApp.properties.defaultHostName : ''
-output storageAccountEndpolint string = storageAccount.properties.primaryEndpoints.blob
+// Fix typo in output name and improve output URLs for clarity
+output FunctionAppUrl string = 'https://${functionApp.properties.defaultHostName}'
+output storageAccountEndpoint string = storageAccount.properties.primaryEndpoints.blob
 output storageAccountName string = storageAccount.name
 output cosmosDbAccountEndpoint string = deployCosmosDB ? cosmosDbAccount.properties.documentEndpoint : ''
 output cosmosDbAccountName string = deployCosmosDB ? cosmosDbAccount.name : ''
@@ -2143,4 +2215,5 @@ output SPEECH_ENDPOINT string = deploySpeechResource ? speech.properties.endpoin
 output LANGUAGE_ENDPOINT string = deployLanguageResource
   ? 'https://${languageTokenName}.cognitiveservices.azure.com/'
   : ''
-output audiomonoFunctionAppUrl string = audiomonoFunctionApp.properties.defaultHostName
+
+output audiomonoWebAppUrl string = 'https://${audiomonoWebApp.properties.defaultHostName}'
