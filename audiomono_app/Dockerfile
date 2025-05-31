@@ -13,4 +13,4 @@ COPY . .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Start FastAPI via uvicorn
-CMD ["uvicorn", "audiomono_main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
