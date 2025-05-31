@@ -6,7 +6,6 @@ import traceback
 import requests
 import asyncio
 import time
-from datetime import datetime, timedelta
 import azure.functions as func
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions

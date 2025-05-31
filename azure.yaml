@@ -56,15 +56,17 @@ services:
           run: del ./requirements.txt
           interactive: false
           continueOnError: false
-
   audiomono:
-    project: ./function_app/
-    language: python
-    host: appservice
-    docker:
-      image: llmpacr01.azurecr.io/functionapp-image:latest
+  project: ./audiomono_app/
+  language: py
+  host: appservice
+  docker:
+    path: ./audiomono_app/Dockerfile
+    image: llmpacr01.azurecr.io/functionapp-image:latest
+  env:
+    AUDIOMONO_ENDPOINT: https://${audiomonoWebAppUrl}
 
-  demoapp:
+  webapp:
     project: ./demo_app/
     language: py
     host: appservice

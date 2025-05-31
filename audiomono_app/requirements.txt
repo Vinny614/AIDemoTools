@@ -1,0 +1,6 @@
+# This file defines the requirements for both the function app and the gradio app.
+fastapi==0.111.0
+uvicorn==0.29.0
+azure-identity==1.17.1
+azure-storage-blob>=12.19.1
+pydantic==2.8.2

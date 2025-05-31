@@ -2085,7 +2085,7 @@ resource audiomonoWebApp 'Microsoft.Web/sites@2024-04-01' = {
   properties: {
     httpsOnly: true
     publicNetworkAccess: functionAppAllowPublicAccess ? 'Enabled' : 'Disabled'
-    serverFarmId: functionAppPlan.id
+    serverFarmId: webAppPlan.id
     siteConfig: {
       alwaysOn: true
       linuxFxVersion: 'DOCKER|${audiomonoContainerImage}'
@@ -2217,3 +2217,5 @@ output LANGUAGE_ENDPOINT string = deployLanguageResource
   : ''
 
 output audiomonoWebAppUrl string = 'https://${audiomonoWebApp.properties.defaultHostName}'
+
+output AUDIOMONO_ENDPOINT string = 'https://audiomono-${resourceToken}.azurewebsites.net'

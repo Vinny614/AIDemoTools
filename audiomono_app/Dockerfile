@@ -7,12 +7,10 @@ RUN apt-get update && apt-get install -y ffmpeg
 WORKDIR /app
 
 # Copy app files
-COPY function_app/ .  
-COPY requirements.txt .
+COPY . .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Start FastAPI via uvicorn
 CMD ["uvicorn", "audiomono_main:app", "--host", "0.0.0.0", "--port", "80"]
-
