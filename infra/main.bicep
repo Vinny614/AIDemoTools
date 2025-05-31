@@ -2089,6 +2089,7 @@ resource audiomonoWebApp 'Microsoft.Web/sites@2024-04-01' = {
     siteConfig: {
       alwaysOn: true
       linuxFxVersion: 'DOCKER|${audiomonoContainerImage}'
+      acrUseManagedIdentityCreds: true
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       ipSecurityRestrictionsDefaultAction: 'Deny'
@@ -2157,10 +2158,7 @@ resource audiomonoWebApp 'Microsoft.Web/sites@2024-04-01' = {
           name: 'FUNCTION_HOSTNAME'
           value: 'https://${functionApp.properties.defaultHostName}'
         }
-        {
-          name: 'FUNCTION_KEY'
-          value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=${funcAppKeyKvSecretName})'
-        }
+        // No FUNCTION_KEY included — using managed identity only
       ]
     }
   }
