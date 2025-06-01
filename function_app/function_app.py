@@ -462,3 +462,38 @@ async def call_audiomono_container(blob_url, storage_account_name, source_contai
         logging.error(f"Exception calling audiomono container: {e}")
         return None
 
+
+@app.function_name("audio_preprocessed_blob_trigger")
+@app.blob_trigger(
+    arg_name="inputblob3",
+    path="audio-preprocessed/{name}",
+    connection="AzureWebJobsStorage",
+)
+async def audio_preprocessed_blob_trigger(inputblob3: func.InputStream):
+    logging.warning("🔥 Preprocessed blob trigger fired!")
+    blob_name = inputblob3.name.replace("audio-preprocessed/", "")
+    logging.warning(f"Preprocessed blob name: {blob_name}")
+
+    try:
+        await asyncio.sleep(7)  # Simulate some processing delay
+        storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+        if not storage_account_name:
+            raise ValueError("Missing STORAGE_ACCOUNT_NAME environment variable")
+        content_url = f"https://{storage_account_name}.blob.core.windows.net/audio-preprocessed/{blob_name}"
+        logging.warning(f"✅ Preprocessed audio URL: {content_url}")
+        # Wait until blob is actually ready before processing in audio-preprocessed
+        if not await wait_for_blob_ready_async(content_url, "audio-preprocessed"):
+            logging.error("❌ Preprocessed blob not ready after retries. Skipping processing.")
+            return
+        # Start orchestrator or further processing here
+        # Example: start orchestrator (uncomment and adapt if needed)
+        # client = df.DurableOrchestrationClient(starter)
+        # instance_id = await client.start_new(
+        #     orchestration_function_name="audio_processing_orchestrator",
+        #     client_input={"content_url": content_url, "blob_name": blob_name}
+        # )
+        # logging.info(f"🎬 Started orchestrator with instance ID: {instance_id}")
+    except Exception as e:
+        logging.error(f"❌ Error in preprocessed blob trigger: {e}")
+        logging.error(traceback.format_exc())
+
