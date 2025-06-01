@@ -6,8 +6,8 @@ RUN apt-get update && apt-get install -y ffmpeg
 # Set working directory
 WORKDIR /app
 
-# Copy app files
-COPY . .
+# Copy only the relevant app folder
+COPY ./audiomono_app /app
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt

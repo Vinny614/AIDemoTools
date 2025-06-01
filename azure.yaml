@@ -61,10 +61,11 @@ services:
     language: py
     host: appservice
     docker:
-      path: ./audiomono_app/Dockerfile
+      path: ./audiomono_app
       image: llmpacr01.azurecr.io/functionapp-image:latest
     env:
       AUDIOMONO_ENDPOINT: https://${audiomonoWebAppUrl}
+
 
   webapp:
     project: ./demo_app/

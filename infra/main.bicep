@@ -64,7 +64,8 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
 
 // Assign the function app's managed identity ACR pull permissions
 resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
-  name: guid(acr.id, 'acrpull', audiomonoWebApp.name)
+  name: guid(acr.id, 'acrpull', functionApp.name)
+
   scope: acr
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
@@ -2056,7 +2057,7 @@ module functionAppStorageRoleAssignments 'storage-account-role-assignment.bicep'
   params: {
     storageAccountName: storageAccount.name
     principalId: functionApp.identity.principalId
-    roleDefintionIds: storageRoleDefinitionIds
+    roleDefinitionIds: storageRoleDefinitionIds
   }
 }
 
@@ -2179,7 +2180,7 @@ module audiomonoWebAppStorageRoleAssignments 'storage-account-role-assignment.bi
   params: {
     storageAccountName: storageAccount.name
     principalId: audiomonoWebApp.identity.principalId
-    roleDefintionIds: storageRoleDefinitionIds
+    roleDefinitionIds: storageRoleDefinitionIds
   }
 }
 
