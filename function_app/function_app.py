@@ -224,6 +224,7 @@ def audio_processing_orchestrator(context):
             logging.error(f"❌ Error in batch processing: {result_data.get('error') if result_data else 'No result_data'}")
             return {"error": result_data.get("error") if result_data else "No result_data"}
 
+        # FIX: Actually call write_output_activity here
         logging.info("[Orchestrator] Calling write_output_activity")
         write_result = yield context.call_activity("write_output_activity", result_data)
         logging.info(f"[Orchestrator] write_output_activity result: {write_result}")
@@ -263,7 +264,8 @@ def start_batch_activity(input_data):
         ],
         "properties": {
             "wordLevelTimestampsEnabled": True,
-            "diarizationEnabled": False,
+            "displayFormWordLevelTimestampsEnabled": True,
+            "diarizationEnabled": True,
             "punctuationMode": "DictatedAndAutomatic",
             "profanityFilterMode": "None",
             "transcriptionMode": "Batch",
@@ -338,24 +340,36 @@ def poll_batch_activity(batch_info):
                 result_response.raise_for_status()
                 result_json = result_response.json()
 
-                phrases = result_json.get("combinedRecognizedPhrases", [])
-                segments = [
-                    {
-                        "speaker": p.get("speaker"),
-                        "text": p.get("display"),
+                phrases = result_json.get("recognizedPhrases", [])
+                segments = []
+                for p in phrases:
+                    text = p.get("display", "")
+                    if not text and "nBest" in p and p["nBest"]:
+                        text = p["nBest"][0].get("display", "")
+                    segment = {
+                        "speaker": p.get("speaker", "Unknown"),
+                        "text": text,
                         "offset": p.get("offset"),
                         "duration": p.get("duration")
                     }
-                    for p in phrases
-                ]
-                full_text = " ".join([p.get("display", "") for p in phrases])
-                speakers = list({p.get("speaker") for p in phrases if "speaker" in p})
+                    segments.append(segment)
+
+                # Optionally, group by speaker for better readability
+                grouped = {}
+                for seg in segments:
+                    speaker = seg["speaker"]
+                    grouped.setdefault(speaker, []).append(seg["text"])
+
+                # Build a readable transcript
+                full_text = ""
+                for speaker, texts in grouped.items():
+                    full_text += f"\nSpeaker {speaker}:\n" + "\n".join(texts)
 
                 result = {
                     "result": {
-                        "transcript": full_text,
+                        "transcript": full_text.strip(),
                         "segments": segments,
-                        "speakers_detected": speakers
+                        "speakers_detected": list(grouped.keys())
                     },
                     "blob_name": blob_name
                 }
