@@ -469,7 +469,11 @@ async def call_audiomono_container(blob_url, storage_account_name, source_contai
     path="audio-preprocessed/{name}",
     connection="AzureWebJobsStorage",
 )
-async def audio_preprocessed_blob_trigger(inputblob3: func.InputStream):
+@app.durable_client_input(client_name="client")
+async def audio_preprocessed_blob_trigger(
+    inputblob3: func.InputStream,
+    client: df.DurableOrchestrationClient
+):
     logging.warning("🔥 Preprocessed blob trigger fired!")
     blob_name = inputblob3.name.replace("audio-preprocessed/", "")
     logging.warning(f"Preprocessed blob name: {blob_name}")
@@ -485,14 +489,14 @@ async def audio_preprocessed_blob_trigger(inputblob3: func.InputStream):
         if not await wait_for_blob_ready_async(content_url, "audio-preprocessed"):
             logging.error("❌ Preprocessed blob not ready after retries. Skipping processing.")
             return
-        # Start orchestrator or further processing here
-        # Example: start orchestrator (uncomment and adapt if needed)
-        # client = df.DurableOrchestrationClient(starter)
-        # instance_id = await client.start_new(
-        #     orchestration_function_name="audio_processing_orchestrator",
-        #     client_input={"content_url": content_url, "blob_name": blob_name}
-        # )
-        # logging.info(f"🎬 Started orchestrator with instance ID: {instance_id}")
+
+        input_payload = {
+            "content_url": content_url,
+            "blob_name": blob_name
+        }
+
+        instance_id = await client.start_new("audio_processing_orchestrator", None, input_payload)
+        logging.info(f"🎯 Orchestration started: {instance_id}")
     except Exception as e:
         logging.error(f"❌ Error in preprocessed blob trigger: {e}")
         logging.error(traceback.format_exc())
