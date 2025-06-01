@@ -247,7 +247,8 @@ def start_batch_activity(input_data):
     credential = DefaultAzureCredential()
 
     # Use sync blob readiness check to avoid asyncio issues in activity context
-    if not is_blob_ready_sync(content_url, "audio-in"):
+    # FIX: Use the correct container name
+    if not is_blob_ready_sync(content_url, "audio-preprocessed"):
         raise Exception(f"Blob {blob_name} not ready after retries. Aborting transcription.")
 
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
@@ -258,7 +259,7 @@ def start_batch_activity(input_data):
         "displayName": f"Transcription - {blob_name}",
         "locale": "en-GB",
         "contentUrls": [
-            f"https://{storage_account_name}.blob.core.windows.net/audio-in/{blob_name}"
+            f"https://{storage_account_name}.blob.core.windows.net/audio-preprocessed/{blob_name}"
         ],
         "properties": {
             "wordLevelTimestampsEnabled": True,
