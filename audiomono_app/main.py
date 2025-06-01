@@ -16,6 +16,10 @@ logging.basicConfig(
 
 app = FastAPI()
 
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "audiomono is running"}
+
 @app.get("/healthz")
 def health_check():
     """Health check endpoint."""

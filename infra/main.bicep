@@ -1915,10 +1915,9 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         allowedOrigins: [
           '*'
         ]
-        
       }
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
-      scmIpSecurityRestrictionsUseMain: true // Use same IP restrictions for the SCM deployment site as the main site
+      scmIpSecurityRestrictionsUseMain: true
       ipSecurityRestrictions: concat(
         [
           {
@@ -1976,10 +1975,11 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
       FUNCTIONS_EXTENSION_VERSION: '~4'
       FUNCTIONS_WORKER_RUNTIME: 'python'
-      STORAGE_ACCOUNT_NAME: storageAccount.name // <-- Add this line
+      STORAGE_ACCOUNT_NAME: storageAccount.name
       DurableFunctions_HttpStart_Url: durableFunctionsHttpStartUrl
       SPEECH_RESOURCE_ID: speech.id
-
+      // Ensure AUDIOMONO_ENDPOINT is set for the function app:
+      AUDIOMONO_ENDPOINT: 'https://audiomono-${resourceToken}.azurewebsites.net'
     })
   }
   dependsOn: [
@@ -1995,6 +1995,7 @@ resource privateAppDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (
 
 resource privateAppDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (functionAppNetworkingType == 'PrivateEndpoint' || webAppUsePrivateEndpoint) {
   parent: privateAppDnsZone
+ 
   name: '${privateAppDnsZoneName}-link'
   location: 'global'
   properties: {
