@@ -1086,7 +1086,7 @@ resource contentUnderstanding 'Microsoft.CognitiveServices/accounts@2024-10-01' 
         ? [
             {
               id: '${vnet.id}/subnets/${functionAppSubnetName}'
-              ignoreMissingVnetServiceEndpoint: false
+              ignoreMissingVNetServiceEndpoint: false
             }
           ]
         : []
@@ -1180,7 +1180,7 @@ resource docIntel 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (deploy
         ? [
             {
               id: '${vnet.id}/subnets/${functionAppSubnetName}'
-              ignoreMissingVnetServiceEndpoint: false
+              ignoreMissingVNetServiceEndpoint: false
             }
           ]
         : []
@@ -1275,7 +1275,7 @@ resource speech 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (deploySp
         ? [
             {
               id: '${vnet.id}/subnets/${functionAppSubnetName}'
-              ignoreMissingVnetServiceEndpoint: false
+              ignoreMissingVNetServiceEndpoint: false
             }
           ]
         : []
@@ -1353,7 +1353,7 @@ resource language 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (deploy
         ? [
             {
               id: '${vnet.id}/subnets/${functionAppSubnetName}'
-              ignoreMissingVnetServiceEndpoint: false
+              ignoreMissingVNetServiceEndpoint: false
             }
           ]
         : []
@@ -1435,7 +1435,7 @@ resource azureopenai 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (dep
         ? [
             {
               id: '${vnet.id}/subnets/${functionAppSubnetName}'
-              ignoreMissingVnetServiceEndpoint: false
+              ignoreMissingVNetServiceEndpoint: false
             }
           ]
         : []
@@ -1560,7 +1560,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
         ? [
             {
               id: '${vnet.id}/subnets/${webAppSubnetName}'
-              ignoreMissingVnetServiceEndpoint: false
+              ignoreMissingVNetServiceEndpoint: false
             }
           ]
         : []
@@ -2108,7 +2108,7 @@ module additionalIdentityStorageRoleAssignments 'storage-account-role-assignment
     params: {
       storageAccountName: storageAccount.name
       principalId: additionalRoleAssignmentIdentityId
-      roleDefinitionIds: storageRoleDefinitionIds
+      roleDefintionIds: storageRoleDefinitionIds
   }
 }
 ]

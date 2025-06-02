@@ -36,43 +36,8 @@ param additionalRoleAssignmentIdentityIds array = []
 param storageAccountName string = 'llmprocstorage'
 
 @description('The name of the default blob storage containers to be created')
-param blobContainerNames array = [
-  'blob-form-to-cosmosdb-blobs'
-  'content-understanding-blobs'
-  'audio-in'
-  'audio-transcript-out'
-]
+param blobContainerNames array = ['blob-form-to-cosmosdb-blobs', 'content-understanding-blobs']
 
-@description('The name of the Azure Container Registry')
-param acrName string = 'llmpacr01'
-
-resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
-  name: acrName
-  location: location
-  sku: {
-    name: 'Premium'
-  }
-  properties: {
-    adminUserEnabled: false
-    publicNetworkAccess: 'Enabled'
-    networkRuleSet: {
-      defaultAction: 'Allow'
-    }
-  }
-  // Ensure ACR is always created before any resource that depends on it
-}
-
-// Assign the function app's managed identity ACR pull permissions
-resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
-  name: guid(acr.id, 'acrpull', functionApp.name)
-
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
-    principalId: audiomonoWebApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
 @description('Whether to deploy the CosmosDB resource. This is required if using CosmosDB as an input data source or when writing records to an output CosmosDB container.')
 param deployCosmosDB bool = false
 
@@ -1824,8 +1789,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       STORAGE_ACCOUNT_NAME: storageAccount.name // <-- Add this line
       DurableFunctions_HttpStart_Url: durableFunctionsHttpStartUrl
       SPEECH_RESOURCE_ID: speech.id
-      // Ensure AUDIOMONO_ENDPOINT is set for the function app:
-      AUDIOMONO_ENDPOINT: 'https://audiomono-${resourceToken}.azurewebsites.net'
+
     })
   }
   dependsOn: [
@@ -1903,7 +1867,7 @@ module functionAppStorageRoleAssignments 'storage-account-role-assignment.bicep'
   params: {
     storageAccountName: storageAccount.name
     principalId: functionApp.identity.principalId
-    roleDefinitionIds: storageRoleDefinitionIds
+    roleDefintionIds: storageRoleDefinitionIds
   }
 }
 
@@ -2034,7 +1998,7 @@ resource privateEndpointWebApp 'Microsoft.Network/privateEndpoints@2024-05-01' =
       id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, webAppPrivateEndpointSubnetName)
     }
     privateLinkServiceConnections: [
-        {
+      {
         name: 'MyFunctionAppPrivateLinkConnection'
         properties: {
           privateLinkServiceId: webApp.id
@@ -2078,15 +2042,15 @@ resource webAppBlobContainerRoleAssignment 'Microsoft.Authorization/roleAssignme
   for containerName in blobContainerNames: {
     name: guid(storageAccount.id, containerName, 'WebAppBlobContainerRoleAssignment')
     scope: blobStorageContainer[indexOf(blobContainerNames, containerName)]
-  properties: {
+    properties: {
       roleDefinitionId: subscriptionResourceId(
         'Microsoft.Authorization/roleDefinitions',
         roleDefinitions.storageBlobDataContributor
       )
       principalId: webApp.identity.principalId
       principalType: 'ServicePrincipal' // <-- Add this line
+    }
   }
-}
 ]
 
 // Add CosmosDB data reader role to web app (for reading output data - e.g. processed documents)
@@ -2108,143 +2072,22 @@ module additionalIdentityStorageRoleAssignments 'storage-account-role-assignment
     params: {
       storageAccountName: storageAccount.name
       principalId: additionalRoleAssignmentIdentityId
-      roleDefinitionIds: storageRoleDefinitionIds
+      roleDefintionIds: storageRoleDefinitionIds
+    }
   }
-}
 ]
 module additionalIdentityCosmosDbRoleAssignment 'cosmosdb-account-role-assignment.bicep' = [
   for additionalRoleAssignmentIdentityId in additionalRoleAssignmentIdentityIds: if (deployCosmosDB) {
     name: guid(cosmosDbAccount.id, additionalRoleAssignmentIdentityId, 'CosmosDbRoleAssignment')
-  scope: resourceGroup()
-  params: {
-    accountName: cosmosDbAccount.name
+    scope: resourceGroup()
+    params: {
+      accountName: cosmosDbAccount.name
       principalId: additionalRoleAssignmentIdentityId
-    roleDefinitionId: cosmosDbDataContributorRoleDefinition.id
-  }
-}
-]
-// 1. Define audiomonoFunctionApp first
-@description('The container image to use for the audiomono function app')
-param audiomonoContainerImage string = 'llmpacr01.azurecr.io/functionapp-image:latest'
-
-resource audiomonoWebApp 'Microsoft.Web/sites@2024-04-01' = {
-  name: 'audiomono-${resourceToken}'
-  location: location
-  kind: 'app,linux,container'
-  tags: union(tags, { 'azd-service-name': 'audiomono' })
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    httpsOnly: true
-    publicNetworkAccess: functionAppAllowPublicAccess ? 'Enabled' : 'Disabled'
-    serverFarmId: webAppPlan.id
-    siteConfig: {
-      alwaysOn: true
-      linuxFxVersion: 'DOCKER|${audiomonoContainerImage}'
-      acrUseManagedIdentityCreds: true
-      ftpsState: 'Disabled'
-      minTlsVersion: '1.2'
-      ipSecurityRestrictionsDefaultAction: 'Deny'
-      scmIpSecurityRestrictionsDefaultAction: 'Deny'
-      scmIpSecurityRestrictionsUseMain: true
-      ipSecurityRestrictions: concat(
-        [
-          {
-            vnetSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, functionAppSubnetName)
-            action: 'Allow'
-            priority: 100
-            name: 'Allow web app subnet'
-          }
-        ],
-        webAppAllowPublicAccess && !empty(webAppAllowedExternalIpRanges)
-          ? concat(
-              map(range(0, length(webAppAllowedExternalIpRanges)), i => {
-                ipAddress: webAppAllowedExternalIpRanges[i]
-                action: 'Allow'
-                priority: 200 + i
-                name: 'External access ${i + 1}'
-              }),
-              [
-                {
-                  ipAddress: '0.0.0.0/0'
-                  action: 'Deny'
-                  priority: 2147483647
-                  name: 'Deny all'
-                }
-              ]
-            )
-          : [],
-        webAppAllowPublicAccess && empty(webAppAllowedExternalIpRanges)
-          ? [
-              {
-                ipAddress: '0.0.0.0/0'
-                action: 'Allow'
-                priority: 2147483647
-                name: 'Allow all'
-              }
-            ]
-          : []
-      )
-      appSettings: [
-        {
-          name: 'WEBSITES_PORT'
-          value: '80'
-        }
-        {
-          name: 'AUDIOMONO_ENDPOINT'
-          value: 'https://audiomono-${resourceToken}.azurewebsites.net'
-        }
-        {
-          name: 'AzureWebJobsStorage__credential'
-          value: 'managedIdentity'
-        }
-        {
-          name: 'AzureWebJobsStorage__serviceUri'
-          value: storageAccountBlobUri
-        }
-        {
-          name: 'STORAGE_ACCOUNT_NAME'
-          value: storageAccount.name
-        }
-        {
-          name: 'FUNCTION_HOSTNAME'
-          value: 'https://${functionApp.properties.defaultHostName}'
-        }
-        // No FUNCTION_KEY included — using managed identity only
-      ]
+      roleDefinitionId: cosmosDbDataContributorRoleDefinition.id
     }
   }
-}
+]
 
-resource audiomonoWebAppVirtualNetwork 'Microsoft.Web/sites/networkConfig@2024-04-01' = {
-  parent: audiomonoWebApp
-  name: 'virtualNetwork'
-  properties: {
-    subnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, functionAppSubnetName)
-    swiftSupported: true
-  }
-}
-
-module audiomonoWebAppStorageRoleAssignments 'storage-account-role-assignment.bicep' = {
-  name: 'audiomonoWebAppStorageRoleAssignments'
-  scope: resourceGroup()
-  params: {
-    storageAccountName: storageAccount.name
-    principalId: audiomonoWebApp.identity.principalId
-    roleDefinitionIds: storageRoleDefinitionIds
-  }
-}
-
-module audiomonoWebAppCosmosDbRoleAssignment 'cosmosdb-account-role-assignment.bicep' = if (deployCosmosDB) {
-  name: 'audiomonoWebAppCosmosDbRoleAssignment'
-  scope: resourceGroup()
-  params: {
-    accountName: cosmosDbAccount.name
-    principalId: audiomonoWebApp.identity.principalId
-    roleDefinitionId: cosmosDbDataContributorRoleDefinition.id
-  }
-}
 // Add Language endpoint to outputs
 output FunctionAppUrl string = functionApp.properties.defaultHostName
 output webAppUrl string = deployWebApp ? webApp.properties.defaultHostName : ''
@@ -2266,7 +2109,3 @@ output SPEECH_ENDPOINT string = deploySpeechResource ? speech.properties.endpoin
 output LANGUAGE_ENDPOINT string = deployLanguageResource
   ? 'https://${languageTokenName}.cognitiveservices.azure.com/'
   : ''
-
-output audiomonoWebAppUrl string = 'https://${audiomonoWebApp.properties.defaultHostName}'
-
-output AUDIOMONO_ENDPOINT string = 'https://audiomono-${resourceToken}.azurewebsites.net'

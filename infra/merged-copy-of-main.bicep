@@ -2108,7 +2108,7 @@ module additionalIdentityStorageRoleAssignments 'storage-account-role-assignment
     params: {
       storageAccountName: storageAccount.name
       principalId: additionalRoleAssignmentIdentityId
-      roleDefinitionIds: storageRoleDefinitionIds
+      roleDefintionIds: storageRoleDefinitionIds
   }
 }
 ]
