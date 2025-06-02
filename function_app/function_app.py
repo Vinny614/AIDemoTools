@@ -517,7 +517,74 @@ async def audio_preprocessed_blob_trigger(
         logging.error(traceback.format_exc())
 
 ##### Adding video processing orchestration
+import os
+import logging
+import traceback
+import asyncio
+from azure.storage.blob.aio import BlobServiceClient
+import azure.functions as func
 
+# --- VIDEO CONTAINER CALLER ---
+async def call_video_processing_container(blob_url, storage_account_name, source_container, dest_container):
+    """
+    Calls the video container app to process the uploaded video.
+    """
+    processor_url = os.getenv("VIDEOPROCESS_ENDPOINT")
+    if not processor_url:
+        logging.error("VIDEOPROCESS_ENDPOINT not set")
+        return None
+
+    payload = {
+        "blob_url": blob_url,
+        "storage_account_name": storage_account_name,
+        "source_container": source_container,
+        "dest_container": dest_container
+    }
+
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{processor_url}/process", json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("processed_url")
+                else:
+                    text = await resp.text()
+                    logging.error(f"❌ Video container call failed: {resp.status} - {text}")
+                    return None
+    except Exception as e:
+        logging.error(f"❌ Exception in call_video_processing_container: {e}")
+        return None
+
+
+# --- WAIT FOR BLOB ---
+async def wait_for_blob_ready_async(blob_url, container_name, max_retries=6, delay=5):
+    try:
+        from azure.identity.aio import DefaultAzureCredential
+        credential = DefaultAzureCredential()
+        blob_service_client = BlobServiceClient(
+            account_url=f"https://{os.getenv('STORAGE_ACCOUNT_NAME')}.blob.core.windows.net",
+            credential=credential
+        )
+        container_client = blob_service_client.get_container_client(container_name)
+        blob_name = blob_url.split("/")[-1]
+        blob_client = container_client.get_blob_client(blob_name)
+
+        for _ in range(max_retries):
+            props = await blob_client.get_blob_properties()
+            if props.size > 0:
+                await blob_service_client.close()
+                return True
+            await asyncio.sleep(delay)
+
+        await blob_service_client.close()
+        return False
+    except Exception as e:
+        logging.error(f"❌ Error checking blob readiness in {container_name}: {e}")
+        return False
+
+
+# --- BLOB TRIGGER FOR VIDEO ---
 @app.function_name("video_blob_trigger")
 @app.blob_trigger(
     arg_name="inputblob_video",
@@ -528,15 +595,20 @@ async def video_blob_trigger(inputblob_video: func.InputStream):
     logging.warning("🎥 Video blob trigger fired!")
     blob_name = inputblob_video.name.replace("video-in/", "")
     storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+    if not storage_account_name:
+        logging.error("Missing STORAGE_ACCOUNT_NAME")
+        return
+
     content_url = f"https://{storage_account_name}.blob.core.windows.net/video-in/{blob_name}"
+    logging.warning(f"🎥 Raw video URL: {content_url}")
 
     try:
-        # Wait until the uploaded blob is fully ready
+        # Wait for uploaded video to become available
         if not await wait_for_blob_ready_async(content_url, "video-in"):
             logging.error("❌ Video blob not ready after retries. Skipping.")
             return
 
-        # Call container app to process the video
+        # Call container app to process video
         processed_url = await call_video_processing_container(
             blob_url=content_url,
             storage_account_name=storage_account_name,
@@ -545,15 +617,17 @@ async def video_blob_trigger(inputblob_video: func.InputStream):
         )
 
         if not processed_url:
-            logging.error(f"❌ Video processing failed for {blob_name}")
+            logging.error(f"❌ Processing failed for video: {blob_name}")
             return
 
-        # Wait for processed output to be available
+        logging.info(f"✅ Processed video URL: {processed_url}")
+
+        # Wait for processed file to appear
         if not await wait_for_blob_ready_async(processed_url, "video-processed"):
-            logging.error("❌ Processed video not ready after upload.")
+            logging.error("❌ Processed blob not ready after upload.")
             return
 
-        logging.info(f"✅ Video successfully processed: {processed_url}")
+        logging.info(f"📦 Video processing complete for {blob_name}")
 
     except Exception as e:
         logging.error(f"❌ Error in video_blob_trigger: {e}")
