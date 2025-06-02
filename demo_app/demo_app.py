@@ -2316,9 +2316,9 @@ def audio_transcription_tab(blob_service_client, input_container="audio-in", out
             )
 
 ## New video processing block
-  def video_processing_tab(blob_service_client, input_container="video-in", output_container="video-processed-out"):
-
-    def upload_to_blob(file):
+def video_processing_tab(blob_service_client, input_container="video-in", output_container="video-processed-out"):
+    
+    def upload_video_to_blob(file):
         try:
             file_path = file.name if hasattr(file, "name") else file
             blob_name = os.path.basename(file_path)
@@ -2329,17 +2329,17 @@ def audio_transcription_tab(blob_service_client, input_container="audio-in", out
         except Exception as e:
             return f"❌ Upload failed: {str(e)}"
 
-    def list_output_blobs():
+    def list_video_outputs():
         try:
             container_client = blob_service_client.get_container_client(output_container)
             return [blob.name for blob in container_client.list_blobs()]
         except Exception as e:
             return [f"❌ Failed to list outputs: {str(e)}"]
 
-    def get_output_choices():
-        return gr.update(choices=list_output_blobs())
+    def update_video_dropdown():
+        return gr.update(choices=list_video_outputs())
 
-    def show_selected_blob(name):
+    def show_video_output(name):
         try:
             container_client = blob_service_client.get_container_client(output_container)
             blob = container_client.download_blob(name)
@@ -2347,7 +2347,7 @@ def audio_transcription_tab(blob_service_client, input_container="audio-in", out
         except Exception as e:
             return f"❌ Failed to read output: {str(e)}"
 
-    def download_output_json(name):
+    def download_video_output(name):
         try:
             container_client = blob_service_client.get_container_client(output_container)
             blob = container_client.download_blob(name)
@@ -2362,7 +2362,7 @@ def audio_transcription_tab(blob_service_client, input_container="audio-in", out
 
             return temp_path
         except Exception as e:
-            logging.warning(f"Failed to prep download: {e}")
+            logging.warning(f"Failed to prep video download: {e}")
             return None
 
     with gr.Row():
@@ -2372,43 +2372,43 @@ def audio_transcription_tab(blob_service_client, input_container="audio-in", out
                 type="filepath",
                 file_types=["video"]
             )
-            upload_btn = gr.Button("Upload")
-            upload_status = gr.Textbox(label="Status", interactive=False)
+            video_upload_btn = gr.Button("Upload")
+            video_upload_status = gr.Textbox(label="Status", interactive=False)
 
-            upload_btn.click(
-                fn=upload_to_blob,
+            video_upload_btn.click(
+                fn=upload_video_to_blob,
                 inputs=video_input,
-                outputs=upload_status
+                outputs=video_upload_status
             )
 
         with gr.Column():
-            refresh_btn = gr.Button("Refresh Processed Outputs")
-            output_dropdown = gr.Dropdown(choices=[], label="Available Outputs")
-            output_preview = gr.Textbox(label="Output Content", lines=10)
+            video_refresh_btn = gr.Button("Refresh Processed Outputs")
+            video_dropdown = gr.Dropdown(choices=[], label="Available Outputs")
+            video_output_display = gr.Textbox(label="Output Content", lines=10)
 
-            download_btn = gr.Button("Download JSON")
-            download_file = gr.File(label="Your JSON Download", interactive=False)
+            video_download_btn = gr.Button("Download JSON")
+            video_download_file = gr.File(label="Your JSON Download", interactive=False)
 
-            refresh_btn.click(
-                fn=get_output_choices,
+            video_refresh_btn.click(
+                fn=update_video_dropdown,
                 inputs=[],
-                outputs=output_dropdown
+                outputs=video_dropdown
             )
 
-            output_dropdown.change(
-                fn=show_selected_blob,
-                inputs=output_dropdown,
-                outputs=output_preview
+            video_dropdown.change(
+                fn=show_video_output,
+                inputs=video_dropdown,
+                outputs=video_output_display
             )
 
-            download_btn.click(
-                fn=download_output_json,
-                inputs=output_dropdown,
-                outputs=download_file
+            video_download_btn.click(
+                fn=download_video_output,
+                inputs=video_dropdown,
+                outputs=video_download_file
             )
 
 
-version="0.11"
+version="0.12"
 ## Version Control ###
 ## v0.12 - Updated with video processing block
 ##  v0.11 - Updated with Audio Batch Processing and Blob Storage with downnload
@@ -2454,6 +2454,8 @@ with gr.Blocks(
         di_llm_ext_names_block.render()
     with gr.Tab("Audio Batch Processing (HTTP)"):
         audio_transcription_tab(blob_service_client)
+    with gr.Tab("Video Processing"):
+        video_processing_tab(blob_service_client)
 
 
 if __name__ == "__main__":

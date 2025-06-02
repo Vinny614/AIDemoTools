@@ -516,3 +516,45 @@ async def audio_preprocessed_blob_trigger(
         logging.error(f"❌ Error in preprocessed blob trigger: {e}")
         logging.error(traceback.format_exc())
 
+##### Adding video processing orchestration
+
+@app.function_name("video_blob_trigger")
+@app.blob_trigger(
+    arg_name="inputblob_video",
+    path="video-in/{name}",
+    connection="AzureWebJobsStorage",
+)
+async def video_blob_trigger(inputblob_video: func.InputStream):
+    logging.warning("🎥 Video blob trigger fired!")
+    blob_name = inputblob_video.name.replace("video-in/", "")
+    storage_account_name = os.getenv("STORAGE_ACCOUNT_NAME")
+    content_url = f"https://{storage_account_name}.blob.core.windows.net/video-in/{blob_name}"
+
+    try:
+        # Wait until the uploaded blob is fully ready
+        if not await wait_for_blob_ready_async(content_url, "video-in"):
+            logging.error("❌ Video blob not ready after retries. Skipping.")
+            return
+
+        # Call container app to process the video
+        processed_url = await call_video_processing_container(
+            blob_url=content_url,
+            storage_account_name=storage_account_name,
+            source_container="video-in",
+            dest_container="video-processed"
+        )
+
+        if not processed_url:
+            logging.error(f"❌ Video processing failed for {blob_name}")
+            return
+
+        # Wait for processed output to be available
+        if not await wait_for_blob_ready_async(processed_url, "video-processed"):
+            logging.error("❌ Processed video not ready after upload.")
+            return
+
+        logging.info(f"✅ Video successfully processed: {processed_url}")
+
+    except Exception as e:
+        logging.error(f"❌ Error in video_blob_trigger: {e}")
+        logging.error(traceback.format_exc())

@@ -41,6 +41,8 @@ param blobContainerNames array = [
   'content-understanding-blobs'
   'audio-in'
   'audio-transcript-out'
+  'video-in'
+  'video-processed-out'
 ]
 
 @description('The name of the Azure Container Registry')
