@@ -39,6 +39,7 @@ param storageAccountName string = 'llmprocstorage'
 param blobContainerNames array = [
   'blob-form-to-cosmosdb-blobs'
   'content-understanding-blobs'
+  'audio-preprocessed'
   'audio-in'
   'audio-transcript-out'
   'video-in'
