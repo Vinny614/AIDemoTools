@@ -2410,6 +2410,7 @@ def audio_transcription_tab(blob_service_client, input_container="audio-in", out
 
 version="0.11"
 ## Version Control ###
+## v0.12 - Updated with video processing block
 ##  v0.11 - Updated with Audio Batch Processing and Blob Storage with downnload
 ##  v0.10 - Updated with Audio in and out blob storage
 ##  v0.9 - Updated with version and CSS
