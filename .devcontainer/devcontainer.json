@@ -1,5 +1,5 @@
 {
-  "name": "Korin Dev Env",
+  "name": "Vinny Dev Env",
   "image": "my-devcontainer-python311",
   "remoteUser": "vscode",
   "workspaceFolder": "/workspace",
